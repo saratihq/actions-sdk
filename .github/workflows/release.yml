@@ -39,7 +39,8 @@ jobs:
         with:
           node-version: 24
           cache: pnpm
-          registry-url: https://registry.npmjs.org
+          # No registry-url: it plants an .npmrc that conflicts with
+          # semantic-release's OIDC/token auth (docs: causes EINVALIDNPMTOKEN).
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
       - run: pnpm test
