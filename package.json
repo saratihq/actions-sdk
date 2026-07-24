@@ -1,6 +1,6 @@
 {
   "name": "orchestr-actions-sdk",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Typed, transport-agnostic actions and triggers for the Orchestr automation platform.",
   "license": "MIT",
   "packageManager": "pnpm@10.28.2",
