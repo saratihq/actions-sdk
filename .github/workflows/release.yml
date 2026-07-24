@@ -6,11 +6,11 @@
 #     before it's promoted to stable.
 #   • push to `next`        → semantic-release prereleases under @next.
 #
-# Auth: the stable job tries npm Trusted Publishing (OIDC) first (needs `id-token: write`
-# + a trusted publisher on npm for this repo/release.yml), then falls back to the
-# NPM_TOKEN granular secret. Do NOT set registry-url on setup-node here — it plants an
-# .npmrc that breaks semantic-release's auth. Once OIDC matches, the token is unused and
-# can be dropped. semantic-release's release commit carries [skip ci] so it doesn't loop.
+# Auth: fully tokenless via npm Trusted Publishing (OIDC) — no NPM_TOKEN. Requires
+# `id-token: write` on each publishing job + a trusted publisher registered on npm for
+# this repo/release.yml, and npm >= 11.5.1 (Node 24). Do NOT set registry-url on
+# setup-node — it plants an .npmrc that breaks the OIDC handshake. Provenance is signed
+# automatically. semantic-release's release commit carries [skip ci] so it doesn't loop.
 name: release
 
 on:
@@ -29,7 +29,7 @@ jobs:
       contents: write # tags + CHANGELOG/package.json commit + GitHub release
       issues: write
       pull-requests: write
-      id-token: write # npm provenance
+      id-token: write # OIDC trusted publishing + provenance
     steps:
       - uses: actions/checkout@v4
         with:
@@ -40,15 +40,12 @@ jobs:
         with:
           node-version: 24
           cache: pnpm
-          # No registry-url: it plants an .npmrc that conflicts with
-          # semantic-release's OIDC/token auth (docs: causes EINVALIDNPMTOKEN).
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
       - run: pnpm test
       - run: npx semantic-release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          NPM_TOKEN: ${{ secrets.NPM_TOKEN }} # fallback until OIDC trusted publishing matches
 
   canary:
     name: canary build (@canary, every push)
@@ -56,7 +53,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      id-token: write # npm provenance
+      id-token: write # OIDC trusted publishing + provenance
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -64,10 +61,7 @@ jobs:
         with:
           node-version: 24
           cache: pnpm
-          registry-url: https://registry.npmjs.org
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
       - run: npm version "0.0.0-canary.$(git rev-parse --short HEAD)" --no-git-tag-version
-      - run: npm publish --tag canary --access public --provenance
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      - run: npm publish --tag canary --access public
