@@ -1,0 +1,28 @@
+# Offline CI for the vendor-neutral actions SDK. Runs on every push and PR:
+# build, lint, and the offline unit tests only. No live suites, no secrets —
+# the live smoke tests self-skip without ORCHESTR_LIVE and are never run here.
+name: ci
+
+on:
+  push:
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    name: build + lint + test (offline)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - run: pnpm lint
+      - run: pnpm test

@@ -1,0 +1,70 @@
+# Auto-publish orchestr-actions-sdk to npm.
+#   • push/merge to `main`  → semantic-release cuts a STABLE version from the
+#     feat:/fix: commits (bump + CHANGELOG + git tag + GitHub release + npm @latest).
+#   • every push to `main`  → a CANARY build `0.0.0-canary.<sha>` under the @canary
+#     dist-tag, so bleeding-edge is installable (`pnpm add orchestr-actions-sdk@canary`)
+#     before it's promoted to stable.
+#   • push to `next`        → semantic-release prereleases under @next.
+#
+# Requires repo/org secret NPM_TOKEN (npm "automation" token). Needs GitHub Actions
+# enabled (billing). semantic-release's release commit carries [skip ci] so it doesn't
+# loop.
+name: release
+
+on:
+  push:
+    branches: [main, next]
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: stable release (semantic-release)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # tags + CHANGELOG/package.json commit + GitHub release
+      issues: write
+      pull-requests: write
+      id-token: write # npm provenance
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          registry-url: https://registry.npmjs.org
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - run: pnpm test
+      - run: npx semantic-release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+  canary:
+    name: canary build (@canary, every push)
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # npm provenance
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          registry-url: https://registry.npmjs.org
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - run: npm version "0.0.0-canary.$(git rev-parse --short HEAD)" --no-git-tag-version
+      - run: npm publish --tag canary --access public --provenance
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

@@ -1,0 +1,51 @@
+export {
+  ADD_SUBTRACT_TYPE,
+  addSubtractDate,
+  type AddSubtractResult,
+  type CurrentDateResult,
+  DATE_DIFFERENCE_TYPE,
+  dateDifference,
+  type DateDifferenceResult,
+  EXTRACT_PARTS_TYPE,
+  extractDateParts,
+  type ExtractPartsResult,
+  FIRST_DAY_PREV_MONTH_TYPE,
+  FORMAT_DATE_TYPE,
+  firstDayOfPreviousMonth,
+  formatDate,
+  type FormatDateResult,
+  GET_CURRENT_DATE_TYPE,
+  getCurrentDate,
+  LAST_DAY_PREV_MONTH_TYPE,
+  lastDayOfPreviousMonth,
+  NEXT_DAY_OF_WEEK_TYPE,
+  NEXT_DAY_OF_YEAR_TYPE,
+  type NextDateResult,
+  nextDayOfWeek,
+  nextDayOfYear,
+} from './date';
+
+import {
+  addSubtractDate,
+  dateDifference,
+  extractDateParts,
+  firstDayOfPreviousMonth,
+  formatDate,
+  getCurrentDate,
+  lastDayOfPreviousMonth,
+  nextDayOfWeek,
+  nextDayOfYear,
+} from './date';
+
+/** Every Date action, for catalog builds and registration. */
+export const dateActions = [
+  getCurrentDate,
+  formatDate,
+  extractDateParts,
+  dateDifference,
+  addSubtractDate,
+  nextDayOfWeek,
+  nextDayOfYear,
+  firstDayOfPreviousMonth,
+  lastDayOfPreviousMonth,
+] as const;
