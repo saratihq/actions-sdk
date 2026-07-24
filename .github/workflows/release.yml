@@ -6,10 +6,11 @@
 #     before it's promoted to stable.
 #   • push to `next`        → semantic-release prereleases under @next.
 #
-# Auth: the stable job publishes via npm Trusted Publishing (OIDC) — no token. It needs
-# `id-token: write` plus a trusted publisher registered on npm for this repo + release.yml.
-# The canary job still uses the NPM_TOKEN granular secret (migrate to OIDC later).
-# semantic-release's release commit carries [skip ci] so it doesn't loop.
+# Auth: the stable job tries npm Trusted Publishing (OIDC) first (needs `id-token: write`
+# + a trusted publisher on npm for this repo/release.yml), then falls back to the
+# NPM_TOKEN granular secret. Do NOT set registry-url on setup-node here — it plants an
+# .npmrc that breaks semantic-release's auth. Once OIDC matches, the token is unused and
+# can be dropped. semantic-release's release commit carries [skip ci] so it doesn't loop.
 name: release
 
 on:
@@ -47,6 +48,7 @@ jobs:
       - run: npx semantic-release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }} # fallback until OIDC trusted publishing matches
 
   canary:
     name: canary build (@canary, every push)
