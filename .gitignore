@@ -32,3 +32,6 @@ coverage
 
 # local agent worktrees / tooling
 .claude/
+
+# generated at release time by semantic-release (ships in the npm tarball)
+CHANGELOG.md
