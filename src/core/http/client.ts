@@ -24,30 +24,17 @@ export interface RequestOptions {
   headers?: Record<string, string>;
   query?: Record<string, QueryValue>;
   body?: JsonValue;
-  /**
-   * A multipart/form-data body (file upload). Mutually exclusive with `body`.
-   * Rides only the direct transport — the managed proxy rejects it loudly (JSON only).
-   */
+  /** multipart/form-data body; exclusive with `body`/`form`, direct transport only (the proxy is JSON-only). */
   multipart?: MultipartInput;
-  /**
-   * An `application/x-www-form-urlencoded` body — for providers whose writes take
-   * form bodies, not JSON (Stripe's REST API). Mutually exclusive with `body`/
-   * `multipart`. Rides only the direct transport — the managed proxy rejects it (JSON only).
-   */
+  /** url-encoded form body; exclusive with `body`/`multipart`, direct transport only (the proxy is JSON-only). */
   form?: FormInput;
-  /**
-   * `'binary'` returns the raw response bytes as a `Buffer` in `data` (for
-   * downloading a file). Defaults to `'json'` (parse JSON, else raw text).
-   */
+  /** `'binary'` returns raw bytes as a Buffer in `data`; defaults to `'json'` (JSON, else raw text). */
   responseType?: ResponseType;
   /** Caller cancellation; composed with the per-request timeout. */
   signal?: AbortSignal;
   /** Override the client's default timeout for this call. */
   timeoutMs?: number;
-  /**
-   * Force retry-on-failure for a normally non-idempotent method (e.g. a POST
-   * carrying an idempotency key). Defaults to the method's natural idempotency.
-   */
+  /** Force (or forbid) retry for a method whose natural idempotency says otherwise. */
   idempotent?: boolean;
   /** Return the response even on non-2xx instead of throwing. Default: throw. */
   throwOnError?: boolean;
@@ -67,14 +54,7 @@ export interface HttpClientOptions {
   defaultHeaders?: Record<string, string>;
 }
 
-/**
- * The transport-agnostic HTTP client actions call. It owns everything that must
- * behave identically regardless of *how* the request is sent: URL/query
- * assembly, default headers, per-request timeouts, retry-with-backoff on
- * retryable failures (respecting `Retry-After`), and reducing every non-2xx or
- * transport error to the one {@link NormalizedFailure} shape. The credential and
- * the wire hop belong to the {@link Transport} pulled from `auth`.
- */
+/** Transport-agnostic HTTP client: query/headers, timeouts, retry-with-backoff, and one {@link NormalizedFailure} shape. */
 export class HttpClient {
   private readonly retry: RetryPolicy;
   private readonly defaultTimeoutMs: number;
@@ -122,9 +102,7 @@ export class HttpClient {
         retryable: false,
       });
     }
-    // The multipart/form bodies carry their own Content-Type (boundary /
-    // url-encoded), set by the transport when it encodes; only a JSON `body` gets
-    // the default json header.
+    // multipart/form bodies get their Content-Type from the transport; only a JSON `body` is defaulted here.
     const body: RequestBody | undefined =
       options.multipart !== undefined
         ? buildMultipart(options.multipart)
@@ -140,7 +118,6 @@ export class HttpClient {
 
     let attempt = 0;
     for (;;) {
-      // Fresh timeout controller per attempt, composed with the caller's signal.
       const { signal, expired, dispose } = withTimeout(timeoutMs, options.signal);
       const request: NormalizedRequest = {
         method,
@@ -153,19 +130,15 @@ export class HttpClient {
 
       let failure: NormalizedFailure | null = null;
       let retryAfterMs: number | null = null;
-      // The transport's own ActionError, kept so a definitive failure (e.g.
-      // `unsupported_body` — a file on the JSON-only proxy) surfaces with its
-      // real code, not relabelled `transport_unreachable` when we stop retrying.
+      // Kept so a definitive transport failure keeps its real code instead of `transport_unreachable`.
       let thrown: ActionError | null = null;
       try {
-        // Race the send against the timeout so a transport that ignores the
-        // abort signal can never hang the client past `timeoutMs`.
+        // Raced so a transport that ignores the abort signal can never hang past `timeoutMs`.
         const response = await Promise.race([transport.send(request), expired]);
         if (response.status >= 200 && response.status < 300) {
           dispose();
           return { status: response.status, headers: response.headers, data: response.data as T };
         }
-        // A non-2xx HTTP response — surface (or throw) unless retryable.
         if (options.throwOnError === false) {
           dispose();
           return { status: response.status, headers: response.headers, data: response.data as T };
@@ -181,7 +154,6 @@ export class HttpClient {
         dispose();
       }
 
-      // If the caller aborted, don't keep retrying — propagate immediately.
       if (options.signal?.aborted) {
         throw new ActionError({
           code: 'transport_timeout',
@@ -194,8 +166,7 @@ export class HttpClient {
       const canRetry =
         failure.retryable && (idempotent || failure.status === 0) && attempt < this.retry.retries;
       if (!canRetry) {
-        // Preserve the transport's own error (real code + detail) when it threw
-        // one; only synthesise for the HTTP-status path (no original error).
+        // Only synthesise an error for the HTTP-status path; a transport throw keeps its own code.
         if (thrown) throw thrown;
         throw new ActionError({
           code: failure.status === 0 ? 'transport_unreachable' : 'http_error',
@@ -213,11 +184,7 @@ export class HttpClient {
   }
 }
 
-/**
- * A per-attempt timeout: an {@link AbortSignal} that fires on timeout or when the
- * caller aborts, plus an `expired` promise that REJECTS on timeout so the client
- * can race it against the send. `expired` never resolves; it is only ever raced.
- */
+/** Per-attempt timeout: a signal that fires on timeout/caller-abort, plus an `expired` promise that only ever rejects. */
 function withTimeout(
   timeoutMs: number,
   caller?: AbortSignal,

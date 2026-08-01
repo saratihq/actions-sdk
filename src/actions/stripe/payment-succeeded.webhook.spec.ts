@@ -20,10 +20,7 @@ function delivery(payload: unknown, secret = SECRET): WebhookRequest {
   };
 }
 
-/**
- * A Stripe `charge.succeeded` event (shape from the public events/object + charge
- * docs). `data.object` is the full charge resource.
- */
+/** A Stripe `charge.succeeded` event; `data.object` is the full charge resource. */
 const CHARGE_EVENT = {
   id: 'evt_1NG8Du2eZvKYlo2CUI79vXWy',
   object: 'event',

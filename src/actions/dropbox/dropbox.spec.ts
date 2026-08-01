@@ -3,12 +3,7 @@ import type { NormalizedRequest, NormalizedResponse } from '../../core/http/type
 import { FakeTransport, stubAuth } from '../../testing/fakes';
 import { createFolder, getFileMetadata, getTemporaryLink, listFolder, search } from './files';
 
-/**
- * Golden offline tests for the Dropbox actions. A {@link FakeTransport} replays
- * canned API v2 responses and records requests, asserting the RPC endpoints, the
- * JSON bodies, the `list_folder`/`continue` cursor loop, and the nested
- * `search_v2` / `create_folder_v2` envelope unwrapping without a connection.
- */
+/** Golden offline tests for the Dropbox actions, driven by a {@link FakeTransport}. */
 function fake(handler: (req: NormalizedRequest, i: number) => NormalizedResponse) {
   const transport = new FakeTransport(handler);
   return { auth: stubAuth(transport, 'oauth2'), http: new HttpClient(), transport };

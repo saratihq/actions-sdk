@@ -2,24 +2,7 @@ import { defineTrigger } from '../../core/trigger';
 import { shortText } from '../../core/props';
 import { instanceUrlProp, jiraAuth, resolveJiraBase } from './common';
 
-/**
- * Polling trigger (`jira.new_issue`) — fires for each newly created Jira issue.
- *
- * Why polling, not a registered webhook: Jira Cloud's per-connection webhook
- * registration (`POST /rest/api/3/webhook`, "dynamic webhooks") is **OAuth-2.0-3LO
- * only** (it 401s on the HTTP-Basic/BYO transport), carries **no HMAC signature**
- * to verify a delivery against, and **expires after 30 days** unless refreshed.
- * None of that meets the "verify the provider's signature over the raw body" bar,
- * and it can't run on the direct/BYO transport at all — so the SDK polls, which
- * works identically on both transports. Docs:
- * https://developer.atlassian.com/cloud/jira/platform/webhooks/
- *
- * The poll runs a JQL search ordered newest-first, sampling the head of the list;
- * the SDK's `runPoll` dedupes by issue id, so a re-poll emits only issues not seen
- * before. Endpoint:
- * https://developer.atlassian.com/cloud/jira/platform/rest/v3/api-group-issue-search/
- */
-
+/** Polling trigger — fires for each newly created Jira issue (newest-first JQL head, deduped by id). */
 export const NEW_ISSUE_TYPE = 'jira.new_issue';
 
 /** Head-of-list window sampled per poll — new issues sort to the top. */

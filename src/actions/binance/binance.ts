@@ -1,10 +1,7 @@
 import { defineAction } from '../../core/action';
 import { shortText } from '../../core/props';
 
-/**
- * Binance utility — a no-auth (`none` scheme) action. Reads the public
- * spot-price ticker (`api.binance.com/api/v3/ticker/price`), which needs no API key.
- */
+/** Binance utility — a no-auth (`none` scheme) action reading the public spot-price ticker. */
 
 const BINANCE_BASE = 'https://api.binance.com/api/v3';
 

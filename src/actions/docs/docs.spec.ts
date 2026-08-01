@@ -4,12 +4,7 @@ import { FakeTransport, stubAuth } from '../../testing/fakes';
 import { docPlainText } from './common';
 import { appendText, createDocument, readDocument } from './documents';
 
-/**
- * Golden offline tests for the Google Docs actions. A {@link FakeTransport}
- * replays canned API v1 responses and records the request, asserting the
- * create/read/append endpoints and the plain-text derivation without a
- * connection. (See docs.live.spec.ts for the live smoke tests.)
- */
+/** Golden offline tests for the Google Docs actions, driven by a {@link FakeTransport}. */
 function fake(handler: (req: NormalizedRequest, i: number) => NormalizedResponse) {
   const transport = new FakeTransport(handler);
   return { auth: stubAuth(transport, 'oauth2'), http: new HttpClient(), transport };

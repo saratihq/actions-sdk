@@ -3,11 +3,7 @@ import { FakeTransport, stubAuth } from '../../testing/fakes';
 import { MemoryStore } from '../../testing/memory-store';
 import { newEvent } from './new-event.polling';
 
-/**
- * Real events.list response shape (Google Calendar API v3,
- * GET /calendars/{calendarId}/events) — one timed event with attendees, from
- * Google's public reference.
- */
+/** A real events.list response: one timed event with attendees. */
 const EVENTS_PAGE = {
   kind: 'calendar#events',
   updated: '2026-07-20T18:03:12.000Z',
@@ -58,7 +54,6 @@ describe('calendar.new_event polling trigger', () => {
     });
 
     expect(events).toEqual([]);
-    // The pre-existing backlog is never fetched, let alone fired.
     expect(transport.requests).toHaveLength(0);
     expect(typeof store.snapshot().lastPolledAt).toBe('string');
   });
@@ -108,8 +103,7 @@ describe('calendar.new_event polling trigger', () => {
   });
 
   it('drops an EDIT to a pre-existing event, keeping only events created since the watermark', async () => {
-    // Both come back on updatedMin (both were just touched); only the second was
-    // actually created after the watermark — the first is an old event, re-edited.
+    // Both come back on updatedMin; only the second was actually created after the watermark.
     const page = {
       items: [
         {
@@ -155,15 +149,12 @@ describe('calendar.new_event polling trigger', () => {
 
     expect(events.map((e) => e.id)).toEqual(['older', 'newest']);
     expect(transport.requests).toHaveLength(2);
-    // The second request carries the token from the first page's response.
     expect(new URL(transport.requests[1]!.url).searchParams.get('pageToken')).toBe('PAGE2');
-    // The first request carries none.
     expect(new URL(transport.requests[0]!.url).searchParams.has('pageToken')).toBe(false);
   });
 
   it('advances the watermark and dedupes by id across polls (boundary re-list is a no-op)', async () => {
-    // A just-created event (created ~now) so it survives the *creation* filter on
-    // BOTH polls — proving the second suppression is id-dedup, not the time floor.
+    // Created ~now so it survives the creation filter on BOTH polls: the second suppression is id-dedup.
     const nowIso = new Date().toISOString();
     const recentPage = {
       items: [{ ...EVENTS_PAGE.items[0], id: 'recent-1', created: nowIso, updated: nowIso }],
@@ -178,8 +169,7 @@ describe('calendar.new_event polling trigger', () => {
     });
     expect(first.events.map((e) => e.id)).toEqual(['recent-1']);
 
-    // The same event is re-listed within the overlap window on the next poll —
-    // id-dedup absorbs it, so it never fires twice.
+    // Re-listed within the overlap window on the next poll; id-dedup absorbs it.
     const secondTransport = new FakeTransport(() => okResponse(recentPage));
     const second = await newEvent.runPoll({
       auth: stubAuth(secondTransport),

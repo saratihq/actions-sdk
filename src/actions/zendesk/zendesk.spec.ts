@@ -4,11 +4,6 @@ import { FakeTransport, stubAuth } from '../../testing/fakes';
 import { search } from './other';
 import { createTicket, getTicket, listTickets, updateTicket } from './tickets';
 
-/**
- * Golden offline tests for the Zendesk actions. A {@link FakeTransport} replays
- * canned Support-API envelopes and records requests, asserting the subdomain-scoped
- * host, the `{ ticket }` write body, and `next_page` pagination without a connection.
- */
 const SUB = 'acme';
 const BASE = `https://${SUB}.zendesk.com/api/v2`;
 

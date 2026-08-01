@@ -3,38 +3,15 @@ import type { JsonValue } from '../../core/http/types';
 import { HUBSPOT_API_BASE, type HubspotObject, hubspotAuth } from './common';
 
 /**
- * Polling trigger (`hubspot.new_contact`) — fires when a contact is created.
- *
- * Why polling, not a registered webhook: HubSpot's webhooks are **app-level**: a
- * single target URL configured on the developer app, with subscriptions
- * (`contact.creation`, …) that fan in every install to that one URL and are
- * signed with the app's client secret. There is no public API to register a
- * per-connection (per-portal) webhook with a runtime-provided secret, so the
- * correct-by-construction choice is to poll the CRM v3 search endpoint, filtering
- * on `createdate` and deduping by contact id.
- *
- * Search shape (POST `/crm/v3/objects/contacts/search`, `createdate GT` filter in
- * epoch-millis, `sorts` ASCENDING, `paging.next.after` cursor) is HubSpot's
- * public contract — see
- * https://developers.hubspot.com/docs/guides/api/crm/search . `createdate` filters
- * take an epoch-milliseconds string; `results[].createdAt` comes back ISO-8601.
- *
- * First-poll baseline: on an EMPTY watermark the poll persists the baseline and
- * returns `[]`, so activating the trigger never backfills the portal's existing
- * contacts — only contacts created AFTER activation fire.
+ * Fires when a contact is created. Polling, not webhooks: HubSpot's webhooks are app-level, with no
+ * public API to register a per-portal hook with a runtime secret. `createdate` filters take epoch-millis.
  */
 export const NEW_CONTACT_TYPE = 'hubspot.new_contact';
 
 const SEARCH_URL = `${HUBSPOT_API_BASE}/crm/v3/objects/contacts/search`;
 /**
- * Re-scan overlap (60s) subtracted from the watermark before it becomes the
- * `createdate GT` bound. HubSpot's Search index is eventually consistent — a
- * newly-created contact can take several seconds to become searchable and results
- * can surface out of `createdate` order — so a boundary of `watermark - 2s` would
- * permanently drop contacts indexed late. A window this much wider than the index
- * lag guarantees a late-indexed contact is re-scanned on a later poll; the SDK's
- * id-dedupe keeps the wider re-scan exactly-once.
- * Docs: https://developers.hubspot.com/docs/guides/api/crm/search
+ * Subtracted from the watermark before it becomes the `createdate GT` bound. Must stay far wider than
+ * HubSpot's eventually-consistent search lag, or late-indexed contacts are dropped permanently.
  */
 const OVERLAP_MS = 60_000;
 const PAGE_LIMIT = 100;
@@ -98,9 +75,7 @@ export const newContact = defineTrigger({
   },
   async poll({ auth, http, store, lastPolledAt }): Promise<HubspotContactEvent[]> {
     const nowMs = Date.now();
-    // First poll (empty watermark): self-baseline. Persist the cursor at "now"
-    // and emit nothing, so the portal's pre-existing contacts are never
-    // backfilled as new. Only contacts created after this fire on later polls.
+    // First poll self-baselines at "now", so the portal's pre-existing contacts are never backfilled.
     if (lastPolledAt === undefined) {
       await store.set('cursor', nowMs);
       return [];

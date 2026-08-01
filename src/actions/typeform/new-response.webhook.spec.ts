@@ -25,10 +25,7 @@ function delivery(payload: unknown, secret = SECRET): WebhookRequest {
   };
 }
 
-/**
- * A Typeform `form_response` webhook payload (shape from the public example-payload
- * docs). The answers array carries only answered questions.
- */
+/** A Typeform `form_response` webhook payload; the answers array carries only answered questions. */
 const RESPONSE_PAYLOAD = {
   event_id: '01HZX8P7Q9J8N6M5K4T3R2W1V0',
   event_type: 'form_response',

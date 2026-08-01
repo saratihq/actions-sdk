@@ -5,21 +5,8 @@ import { dropdown, shortText } from '../../core/props';
 import { AIRTABLE_API_BASE, type AirtableRecord, airtableAuth, baseOptions } from './common';
 
 /**
- * Polling trigger (`airtable.new_record`) — fires for each record created in a
- * table after the trigger is enabled.
- *
- * Why polling rather than webhooks: Airtable DOES expose a per-base webhook API
- * (`POST /v0/bases/{baseId}/webhooks`), but it is not a fit for this SDK's
- * registered-webhook contract for two independent reasons: (1) the inbound
- * notification is a content-free *ping* — it carries only `{ base, webhook,
- * timestamp }`, never the changed records, so a second cursor-paged `/payloads`
- * endpoint must be called to learn what changed; and (2) Airtable generates its
- * OWN `macSecretBase64` at registration, so the runtime's `ctx.secret` can't be
- * injected and the `verify(request, secrets)` seam can't receive the
- * provider-minted key. Polling by creation time is therefore correct by
- * construction: `filterByFormula` restricts the read to records created after the
- * last poll, the SDK dedupes by record id, and a small overlap window guards the
- * boundary. Docs: https://airtable.com/developers/web/api/list-records
+ * Fires for each record created after the trigger is enabled. Polling, not webhooks: Airtable's webhook
+ * ping carries no records and mints its own secret, so it cannot meet the registered-webhook contract.
  */
 export const AIRTABLE_NEW_RECORD_TYPE = 'airtable.new_record';
 
@@ -88,8 +75,7 @@ export const newRecord = defineTrigger({
     tableId: 'Tasks',
   },
   async poll({ auth, props, http, lastPolledAt }): Promise<AirtableRecordEvent[]> {
-    // First activation: baseline the watermark, don't backfill the whole table.
-    // The SDK stamps `lastPolledAt = now`; the next poll only sees records created after it.
+    // First activation baselines the watermark rather than backfilling the whole table.
     if (!lastPolledAt) return [];
 
     const cutoff = airtableUtc(Date.parse(lastPolledAt) - OVERLAP_MS);

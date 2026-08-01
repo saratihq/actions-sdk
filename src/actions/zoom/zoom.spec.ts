@@ -4,12 +4,6 @@ import { FakeTransport, stubAuth } from '../../testing/fakes';
 import { zoomAuth } from './common';
 import { createMeeting, deleteMeeting, getMeeting, listMeetings, updateMeeting } from './meetings';
 
-/**
- * Golden offline tests for the Zoom actions. A {@link FakeTransport} replays
- * canned API v2 responses and records requests, asserting the create body, the
- * "me" host fallback, `next_page_token` pagination, the 204 update/delete
- * synthesis, and the live host picker without a connection.
- */
 function fake(handler: (req: NormalizedRequest, i: number) => NormalizedResponse) {
   const transport = new FakeTransport(handler);
   return { auth: stubAuth(transport, 'oauth2'), http: new HttpClient(), transport };

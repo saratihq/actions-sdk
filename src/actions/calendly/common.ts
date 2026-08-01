@@ -4,11 +4,7 @@ import type { NextPageFn } from '../../core/http/pagination';
 import { paginate } from '../../core/http/pagination';
 import type { DropdownOption } from '../../core/props';
 
-/**
- * Shared Calendly building blocks: Calendly's API v2 endpoints, the Bearer PAT
- * auth, the `{ resource }` / `{ collection, pagination }` envelopes, and the
- * `pagination.next_page` full-URL cursor. JSON throughout, so writes work.
- */
+/** Shared Calendly (API v2) building blocks: Bearer auth, the resource/collection envelopes, and the cursor. */
 
 export const CALENDLY_API_BASE = 'https://api.calendly.com';
 
@@ -60,11 +56,7 @@ export async function getCurrentUser(http: HttpClient, auth: AuthHandle): Promis
   return res.data.resource;
 }
 
-/**
- * Live scheduled-event picker. Independent of any other prop — it resolves the
- * user URI itself via `/users/me`, then lists recent events — so it works under
- * today's loader contract. Value is the event uuid (what the path calls need).
- */
+/** Live scheduled-event picker — resolves the user itself, so it stays prop-independent per the loader contract. */
 export async function scheduledEventOptions(
   http: HttpClient,
   auth: AuthHandle,

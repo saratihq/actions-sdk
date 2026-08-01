@@ -2,46 +2,11 @@ import { defineTrigger } from '../../core/trigger';
 import type { JsonValue } from '../../core/http/types';
 import { INTERCOM_API_BASE, INTERCOM_HEADERS, intercomAuth } from './common';
 
-/**
- * Polling trigger (`intercom.new_conversation`) — fires when a conversation is
- * created.
- *
- * Why polling, not a registered webhook: Intercom webhook topics
- * (`conversation.user.created`, …) are configured **at the app level** in the
- * developer hub and signed with the app's client secret (`X-Hub-Signature`,
- * SHA-1); there is no public API to register a per-connection webhook with a
- * runtime-provided secret. So the correct-by-construction choice is to poll the
- * Search Conversations endpoint, filtering on `created_at` and deduping by id.
- *
- * Search shape (POST `/conversations/search`, `query.value[]` of
- * `{ field, operator, value }`, `pagination.starting_after` cursor, top-level
- * `sort: { field, order }`) and the conversation object are Intercom's public
- * contract — see
- * https://developers.intercom.com/docs/references/2.11/rest-api/api.intercom.io/conversations/searchconversations
- * and the pagination/sorting/search reference
- * https://developers.intercom.com/docs/build-an-integration/learn-more/rest-apis/pagination-sorting-search .
- * `created_at` is a Unix timestamp in **seconds**; the operator set is
- * `=,!=,IN,NIN,<,>,~,!~,^,$` (no `>=`), so the watermark is applied with `>`.
- *
- * MONOTONIC PAGINATION — the search is sorted **`created_at` ascending**. With
- * no explicit `sort` Intercom defaults to `last_request_at` DESC, which
- * reorders results whenever a conversation sees activity; under the per-poll
- * page cap that can push a quiet-but-new conversation past the last page while
- * the watermark still advances past it — dropping it forever. Ascending
- * `created_at` makes page order and the `maxCreated` watermark advance together,
- * so a burst simply drains oldest-first across polls, never skips.
- */
+/** Polling trigger — fires when an Intercom conversation is created (search on `created_at`, dedupe by id). */
 export const NEW_CONVERSATION_TYPE = 'intercom.new_conversation';
 
 const SEARCH_URL = `${INTERCOM_API_BASE}/conversations/search`;
-/**
- * Belt-and-braces re-scan window subtracted from the watermark each poll.
- * NOTE: Intercom **day-rounds** the `created_at` value in search comparisons
- * (the date operand is evaluated at day granularity per the pagination/sorting/
- * search reference), so a 2-second overlap is a *no-op* — it is NOT real
- * same-second boundary protection. Correctness at the second boundary comes
- * from id-dedup (the harness `seen` set), not from this window.
- */
+/** Re-scan window on the watermark; boundary correctness comes from id-dedup, not this (Intercom day-rounds dates). */
 const OVERLAP_SEC = 2;
 const PER_PAGE = 100;
 /** Per-poll page cap — bounds work; the watermark advances so a burst drains across polls. */
@@ -125,11 +90,7 @@ export const newConversation = defineTrigger({
   async poll({ auth, http, store, lastPolledAt }): Promise<IntercomConversationEvent[]> {
     const nowSec = Math.floor(Date.now() / 1000);
 
-    // Self-baseline on the first poll ever. The harness only sets `lastPolledAt`
-    // *after* a successful poll, so its absence means this connection has never
-    // run: persist the watermark at "now" and emit nothing, so pre-existing
-    // history is never delivered as new. Every later poll has `lastPolledAt`
-    // set and runs the search below.
+    // First poll ever (no `lastPolledAt`): baseline the watermark and emit nothing, so history isn't delivered as new.
     if (lastPolledAt === undefined) {
       await store.set('cursor', nowSec);
       return [];
@@ -151,7 +112,7 @@ export const newConversation = defineTrigger({
           // Intercom's date operand is a string (docs); day-rounded on compare.
           value: [{ field: 'created_at', operator: '>', value: String(sinceSec) }],
         },
-        // Ascending created_at → monotonic pages + watermark (see file header).
+        // Must stay ascending: the last_request_at DESC default reorders pages and can skip a new conversation.
         sort: { field: 'created_at', order: 'ascending' },
         pagination,
       };

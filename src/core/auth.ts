@@ -1,20 +1,6 @@
 import { ActionError } from './errors';
 import type { NormalizedRequest, Transport } from './http/types';
 
-/**
- * The auth seam.
- *
- * An action declares an {@link AuthScheme} — *how* this app authenticates, for
- * the connect UI and the catalog. At run time it is handed an opaque
- * {@link AuthHandle} and passes it straight to `http`. The handle carries the
- * resolved {@link Transport} behind a private symbol, so the action can read the
- * scheme *type* (to branch behaviour if it must) but can never reach the
- * credential or learn where it came from: a BYO pasted key, an OAuth connection,
- * or a host-supplied managed proxy transport all produce the same handle and the
- * action code is byte-identical across them. This lets one action run against a
- * BYO credential or a managed connection with zero branching.
- */
-
 export type AuthSchemeType = 'oauth2' | 'apiKey' | 'basic' | 'none' | 'custom';
 
 /** OAuth2 — the credential is a bearer access token attached as `Authorization: Bearer …`. */
@@ -55,12 +41,7 @@ export interface CustomScheme {
 
 export type AuthScheme = OAuth2Scheme | ApiKeyScheme | BasicScheme | NoneScheme | CustomScheme;
 
-/**
- * A concrete BYO/direct credential the {@link Transport} attaches. `none` is a
- * first-class case: it lets an action target public data (unauthenticated
- * GitHub reads) through the exact same direct transport, proving the seam
- * spans "has a secret" and "has no secret" without action-code changes.
- */
+/** A concrete BYO/direct credential the {@link Transport} attaches; `none` is a first-class case. */
 export type DirectCredential =
   | { type: 'bearer'; token: string }
   | { type: 'apiKey'; value: string }
@@ -70,12 +51,7 @@ export type DirectCredential =
 /** Private slot: the resolved transport rides here, unreachable from action code. */
 const TRANSPORT = Symbol('orchestr.actions.transport');
 
-/**
- * The opaque handle an action holds. Its *public* surface is only the scheme
- * type; the transport is hidden behind {@link TRANSPORT} and is not exported
- * from the package barrel, so action authors cannot read the credential even by
- * accident. `http` retrieves the transport via {@link transportOf}.
- */
+/** The opaque handle an action holds; its only public surface is the scheme type — the transport stays hidden. */
 export interface AuthHandle {
   readonly scheme: AuthSchemeType;
 }

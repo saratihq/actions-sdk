@@ -1,11 +1,3 @@
-/**
- * Wire-level shapes shared by the HTTP client and every transport. Kept
- * deliberately small and JSON-centric: an action describes *what* it wants
- * (method, url, headers, query, body); a {@link Transport} decides *how* the
- * credential is attached and where the bytes go (direct to the provider, or via
- * a managed proxy). The action never sees the difference.
- */
-
 /** HTTP methods the SDK issues. */
 export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE' | 'HEAD';
 
@@ -15,11 +7,7 @@ export type JsonValue = string | number | boolean | null | JsonValue[] | { [key:
 /** A single query parameter value; arrays repeat the key. */
 export type QueryValue = string | number | boolean | undefined | null | Array<string | number | boolean>;
 
-/**
- * Brand that marks a {@link MultipartBody}. A `Symbol` (not a string field) so a
- * plain JSON object can never masquerade as one — the transport's "encode as
- * multipart vs. serialise as JSON" decision must be forgery-proof.
- */
+/** Brand marking a {@link MultipartBody}; a Symbol so plain JSON can never masquerade as one. */
 export const MULTIPART = Symbol('orchestr.http.multipart');
 
 /** One part of a multipart/form-data body: a scalar field or a file. */
@@ -33,32 +21,16 @@ export type MultipartPart =
       readonly contentType?: string;
     };
 
-/**
- * A multipart/form-data request body — the file-upload shape. Deliberately
- * DISTINCT from {@link JsonValue}: a transport branches on it to encode raw bytes
- * over the wire (direct transport) or reject it loudly (the managed proxy carries JSON
- * only). Built by the client from the `multipart` request option; action code
- * never constructs it by hand.
- */
+/** A multipart/form-data body, distinct from {@link JsonValue}; built by the client, never by action code. */
 export interface MultipartBody {
   readonly [MULTIPART]: true;
   readonly parts: readonly MultipartPart[];
 }
 
-/**
- * Brand that marks a {@link FormBody}. A `Symbol` (like {@link MULTIPART}) so a
- * plain JSON object can never masquerade as one — the transport's "encode as
- * url-encoded form vs. serialise as JSON" decision must be forgery-proof.
- */
+/** Brand marking a {@link FormBody}; a Symbol so plain JSON can never masquerade as one. */
 export const FORM = Symbol('orchestr.http.form');
 
-/**
- * An `application/x-www-form-urlencoded` request body. Like {@link MultipartBody}
- * it is DISTINCT from {@link JsonValue}: the direct transport encodes it to a
- * `key=value&…` string; the managed proxy rejects it (JSON only). Carries the
- * already-flattened `[key, value]` pairs (arrays expanded to `key[i]`) built by
- * the `form` request option — action code never constructs it by hand.
- */
+/** A url-encoded body of already-flattened `[key, value]` pairs (arrays expanded to `key[i]`). */
 export interface FormBody {
   readonly [FORM]: true;
   readonly fields: readonly (readonly [string, string])[];
@@ -80,14 +52,7 @@ export function isFormBody(body: RequestBody | undefined): body is FormBody {
   return typeof body === 'object' && body !== null && (body as FormBody)[FORM] === true;
 }
 
-/**
- * A normalised outbound request. `url` is absolute; `query` is merged into it by
- * the client before the transport sees it. `body` is JSON by default; a
- * {@link MultipartBody} carries file uploads and rides ONLY the direct transport (the
- * managed proxy decodes bodies to JSON and rejects it loudly). `responseType:
- * 'binary'` tells the transport to return raw bytes (a `Buffer`) instead of
- * parsing — for downloading attachments.
- */
+/** A normalised outbound request; `url` is absolute with `query` already merged in by the client. */
 export interface NormalizedRequest {
   method: HttpMethod;
   url: string;
@@ -100,11 +65,7 @@ export interface NormalizedRequest {
   signal?: AbortSignal;
 }
 
-/**
- * A normalised response. `data` is parsed JSON when the body was JSON, the raw
- * text for other text bodies, or a `Buffer` when the request asked for
- * `responseType: 'binary'`.
- */
+/** A normalised response; `data` is parsed JSON, raw text, or a Buffer for `responseType: 'binary'`. */
 export interface NormalizedResponse {
   status: number;
   /** Lower-cased header names. */
@@ -112,24 +73,14 @@ export interface NormalizedResponse {
   data: unknown;
 }
 
-/**
- * The transport seam. A transport takes a fully-formed request and returns a
- * response, or throws an {@link ActionError}. It owns credential attachment and
- * the network hop; it must NOT implement retries or pagination (those live in
- * the client, transport-agnostically). Non-2xx responses are returned, not
- * thrown — the client decides how to surface them.
- */
+/** The transport seam: owns credential attachment and the network hop — never retries or pagination, and returns non-2xx rather than throwing. */
 export interface Transport {
   /** A stable label for diagnostics ("direct", "managed-proxy"). Never secret. */
   readonly kind: string;
   send(request: NormalizedRequest): Promise<NormalizedResponse>;
 }
 
-/**
- * The subset of the WHATWG `fetch` signature the SDK depends on. Injecting it
- * (rather than reaching for the global) makes transports unit-testable without
- * monkey-patching `globalThis` and lets a host supply a proxy-aware fetch.
- */
+/** The subset of the WHATWG `fetch` signature the SDK depends on; injectable so a host can supply its own. */
 export type FetchLike = (
   input: string | URL,
   init?: {
@@ -168,11 +119,7 @@ export function normalizeHeaders(headers?: Record<string, string | undefined>): 
   return out;
 }
 
-/**
- * Append query params to a URL, preserving any already present. Arrays repeat
- * the key (`?a=1&a=2`); null/undefined values are dropped. Keeps the SDK's
- * URL-building in one audited place instead of scattered string concatenation.
- */
+/** Append query params to a URL, preserving existing ones; arrays repeat the key, null/undefined are dropped. */
 export function appendQuery(url: string, query?: Record<string, QueryValue>): string {
   if (!query) return url;
   const pairs = new URLSearchParams();

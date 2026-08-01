@@ -27,12 +27,8 @@ export interface GetFileResult {
 }
 
 /**
- * DOWNLOAD a Slack file's bytes. Two hops: `files.info` (JSON) resolves the
- * private download URL + metadata, then a `responseType: 'binary'` GET pulls the
- * raw bytes — never text-decoded, so a downstream upload step gets the file
- * intact. The bytes ride the direct transport; the same call on a managed
- * connection fails loudly (the managed proxy is JSON-only) — the documented
- * limitation for binary file transfers.
+ * Download a Slack file's bytes: `files.info` resolves the private URL, then a binary GET pulls the bytes.
+ * The bytes need the direct transport — the JSON-only managed proxy fails here.
  */
 export const getFile = defineAction({
   type: GET_FILE_TYPE,

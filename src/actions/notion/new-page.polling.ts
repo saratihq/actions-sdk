@@ -5,21 +5,7 @@ import type { AuthHandle } from '../../core/auth';
 import { dropdown } from '../../core/props';
 import { databaseOptions, NOTION_API_BASE, NOTION_HEADERS, notionAuth } from './common';
 
-/**
- * Polling trigger (`notion.new_page`) — fires for each page (database row)
- * created in a Notion database after the trigger is enabled.
- *
- * STRATEGY CHOICE: Notion's webhook subscriptions are configured
- * per-integration in the Notion dashboard (with a one-time verification-token
- * handshake), NOT registered per-connection via a public create-subscription
- * API — so there is nothing this SDK can `onEnable`/`onDisable` for a given
- * connection. Polling is the correct strategy. The database-query endpoint carries a
- * first-class `created_time` timestamp filter and sort, so the read is scoped
- * server-side to pages created since the last poll (newest first); the SDK
- * dedupes by page id and a small overlap window guards the boundary. This uses
- * the `2022-06-28` query endpoint the rest of the Notion actions are pinned to.
- * Docs: https://developers.notion.com/reference/post-database-query
- */
+/** Polling trigger — fires for each page created in a Notion database after the trigger is enabled. */
 export const NOTION_NEW_PAGE_TYPE = 'notion.new_page';
 
 /** Re-scan overlap (2 min) so a page created mid-poll is never missed; dedupe kills the double. */
@@ -57,12 +43,7 @@ interface QueryEnvelope {
   next_cursor?: string | null;
 }
 
-/**
- * Query a database for pages created after `since`, following Notion's
- * `start_cursor` pagination to completion (bounded). Newest-first, server-scoped
- * by the `created_time` timestamp filter — the correct-by-construction "new page"
- * read.
- */
+/** Query a database for pages created after `since`, newest-first, walking `start_cursor` to completion. */
 async function queryPagesSince(
   http: HttpClient,
   auth: AuthHandle,

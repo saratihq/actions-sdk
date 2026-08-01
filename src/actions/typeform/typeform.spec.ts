@@ -5,12 +5,6 @@ import { typeformAuth } from './common';
 import { getForm, getFormFields, listFormsAction } from './forms';
 import { listResponses } from './responses';
 
-/**
- * Offline tests for the Typeform actions. A {@link FakeTransport} replays canned
- * responses and records requests, asserting the two distinct pagination shapes
- * (forms = page-number, responses = `before`-token), the fields read, and the
- * live form picker without a connection.
- */
 function fake(handler: (req: NormalizedRequest, i: number) => NormalizedResponse) {
   const transport = new FakeTransport(handler);
   return { auth: stubAuth(transport, 'oauth2'), http: new HttpClient(), transport };

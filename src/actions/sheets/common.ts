@@ -4,24 +4,13 @@ import type { HttpClient } from '../../core/http/client';
 import type { JsonValue } from '../../core/http/types';
 import { dropdown, type DropdownOption, type DropdownSchema, shortText } from '../../core/props';
 
-/**
- * Shared Google Sheets (API v4) building blocks: the `/v4/spreadsheets` value
- * endpoints, the A1-notation `range`, OAuth2 Bearer auth, and the
- * `{ values: [[...]] }` body. Everything is JSON, so reads and writes work over
- * the managed transport (no multipart).
- */
-
 export const SHEETS_API_BASE = 'https://sheets.googleapis.com/v4/spreadsheets';
 
 /** Drive is used only to LIST the user's spreadsheets for the picker. */
 const DRIVE_FILES_URL = 'https://www.googleapis.com/drive/v3/files';
 const SPREADSHEET_MIME = 'application/vnd.google-apps.spreadsheet';
 
-/**
- * Sheets authenticates with an OAuth2 bearer access token, attached by the
- * transport. The `spreadsheets` scope covers value reads/writes; `drive.readonly`
- * backs the spreadsheet picker (managed Sheets connections carry it).
- */
+/** OAuth2 bearer auth: `spreadsheets` covers value reads/writes, `drive.readonly` backs the spreadsheet picker. */
 export const sheetsAuth: OAuth2Scheme = {
   type: 'oauth2',
   scopes: ['https://www.googleapis.com/auth/spreadsheets', 'https://www.googleapis.com/auth/drive.readonly'],
@@ -40,12 +29,7 @@ interface DriveFile {
   name: string;
 }
 
-/**
- * Live spreadsheet picker — independent of any other prop (it lists the user's
- * Drive spreadsheets), so it works under the loader contract and honours the
- * loader `search` term. When the connection lacks Drive scope the loader throws
- * and the host runtime degrades the field to free text.
- */
+/** Live spreadsheet picker over Drive; throws when the connection lacks Drive scope, and the host degrades the field to free text. */
 export async function spreadsheetOptions(
   http: HttpClient,
   auth: AuthHandle,
@@ -97,12 +81,7 @@ export function valuesUrl(spreadsheetId: string, range: string): string {
   return `${SHEETS_API_BASE}/${encodeURIComponent(spreadsheetId)}/values/${encodeURIComponent(range)}`;
 }
 
-/**
- * Coerce a caller's `values` input into the 2-D array Sheets expects: a flat row
- * (`['Ada', 99]`) is wrapped as one row (`[['Ada', 99]]`); an array of rows is
- * passed through. A non-array is a caller error (a named `invalid_input`, not a
- * silent corruption of the write).
- */
+/** Coerce `values` into the 2-D array Sheets expects: a flat row is wrapped, rows pass through, a non-array throws `invalid_input`. */
 export function toRows(values: JsonValue): JsonValue[][] {
   if (!Array.isArray(values)) {
     throw new ActionError({

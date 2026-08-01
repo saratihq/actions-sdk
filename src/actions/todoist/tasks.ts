@@ -12,12 +12,7 @@ import {
   todoistNextPage,
 } from './common';
 
-/**
- * Public types — all four reuse existing catalog ids so the host runtime's dedup
- * replaces those rows with these working, live-picker versions: `create_task`
- * / `update_task` directly, `find_task` for the list/get-tasks capability, and
- * `mark_task_completed` for close.
- */
+/** Public types — stable public catalog ids. */
 export const CREATE_TASK_TYPE = 'todoist.create_task';
 export const GET_TASKS_TYPE = 'todoist.find_task';
 export const UPDATE_TASK_TYPE = 'todoist.update_task';
@@ -32,10 +27,7 @@ function priorityProp() {
   });
 }
 
-/**
- * Create a task. `dueString` is Todoist's natural-language due date (e.g.
- * "tomorrow at 4pm", "every friday"); `labels` is an array of label names.
- */
+/** Create a task; `dueString` is Todoist's natural-language due date and `labels` an array of label names. */
 export const createTask = defineAction({
   type: CREATE_TASK_TYPE,
   name: 'Create task',
@@ -65,10 +57,7 @@ export const createTask = defineAction({
   },
 });
 
-/**
- * Get active tasks, optionally scoped to a project (live picker) and/or a Todoist
- * `filter` query (e.g. `today | overdue`). Returns the matching tasks.
- */
+/** Get active tasks, optionally scoped to a project and/or a Todoist `filter` query (e.g. `today | overdue`). */
 export const getTasks = defineAction({
   type: GET_TASKS_TYPE,
   name: 'Get tasks',
@@ -83,10 +72,7 @@ export const getTasks = defineAction({
     }),
   },
   async run({ auth, props, http }): Promise<{ tasks: TodoistTask[]; count: number }> {
-    // A natural-language filter must go to the dedicated filter endpoint: plain
-    // GET /api/v1/tasks IGNORES a `filter`/`query` param and returns every active
-    // task, so scoping only works via GET /api/v1/tasks/filter?query=<filter>.
-    // Both endpoints share the `{ results, next_cursor }` envelope + `?cursor=` paging.
+    // A filter MUST use /tasks/filter — plain GET /tasks silently ignores `query`.
     const hasFilter = typeof props.filter === 'string' && props.filter.trim() !== '';
     const { url, query } = hasFilter
       ? { url: `${TODOIST_API_BASE}/tasks/filter`, query: { query: props.filter } }
@@ -156,8 +142,7 @@ export const closeTask = defineAction({
     taskId: shortText<true>({ label: 'Task id', required: true }),
   },
   async run({ auth, props, http }): Promise<CloseTaskResult> {
-    // A close is not naturally idempotent-safe to blind-retry, but re-closing an
-    // already-closed task is a no-op on Todoist's side, so opt the POST into retry.
+    // Re-closing an already-closed task is a Todoist no-op, so the POST may retry.
     await http.post(`${TODOIST_API_BASE}/tasks/${encodeURIComponent(props.taskId)}/close`, {
       auth,
       idempotent: true,

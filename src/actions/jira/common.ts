@@ -4,41 +4,14 @@ import type { HttpClient } from '../../core/http/client';
 import type { JsonValue } from '../../core/http/types';
 import { shortText } from '../../core/props';
 
-/**
- * Shared Jira Cloud building blocks: the endpoints (`/rest/api/3/*`), the auth,
- * and the Atlassian Document Format body shape are Jira's public REST v3 contract.
- *
- * Jira Cloud is **instance-scoped**, but *how* a call is rooted depends on the
- * transport:
- *
- * - **Direct / BYO** (HTTP-Basic, personal API token) talks straight to the user's
- *   own `https://<site>.atlassian.net/rest/api/3`. The site is connection config,
- *   not a secret, so it rides as the `instanceUrl` prop.
- * - **Managed / 3LO OAuth** (what the managed proxy uses) MUST go through the Atlassian
- *   gateway `https://api.atlassian.com/ex/jira/<cloudId>/rest/api/3` — an OAuth
- *   token against the bare site URL 401s. The `cloudId` is discovered from the
- *   token itself via `accessible-resources`, so `instanceUrl` is optional there.
- *
- * {@link resolveJiraBase} picks the right base per transport; every action resolves
- * it once at the top of `run` instead of assuming the site URL.
- */
+/** Shared Jira Cloud REST v3 building blocks: auth, base-URL resolution, and the ADF body shape. */
 
-/**
- * Jira authenticates with HTTP Basic on the direct transport
- * (`base64(email:apiToken)`) and OAuth2 bearer on the managed transport; the
- * transport attaches whichever the connection carries, so the action code is
- * identical across both.
- */
+/** HTTP Basic (`email:apiToken`) on the direct transport, OAuth2 bearer on managed — the transport picks. */
 export const jiraAuth: BasicScheme = { type: 'basic' };
 
 const API_PATH = '/rest/api/3';
 
-/**
- * Atlassian's gateway lists the sites an OAuth token can reach. Absolute URL — on
- * the managed transport it routes through the proxy; on the direct/basic transport
- * it 401s (the endpoint is OAuth-only), which is exactly the signal
- * {@link resolveJiraBase} uses to fall back to the site URL.
- */
+/** OAuth-only site listing; its 401 on the direct/basic transport is the fallback signal in {@link resolveJiraBase}. */
 const ACCESSIBLE_RESOURCES_URL = 'https://api.atlassian.com/oauth/token/accessible-resources';
 
 /** Root a direct/BYO REST v3 call at the connection's own site, trailing slash tolerated. */
@@ -61,11 +34,7 @@ function normaliseSite(url: string): string {
   return url.replace(/\/+$/, '').toLowerCase();
 }
 
-/**
- * List the Jira sites the connected token can reach. Returns `[]` on the
- * direct/basic transport (the endpoint is OAuth-only → 401) or on any failure, so
- * the caller can fall back to the site URL. Never throws.
- */
+/** List the Jira sites the token can reach; never throws — `[]` means "fall back to the site URL". */
 async function fetchAccessibleResources(http: HttpClient, auth: AuthHandle): Promise<AtlassianResource[]> {
   try {
     const res = await http.get<unknown>(ACCESSIBLE_RESOURCES_URL, { auth, throwOnError: false });
@@ -82,17 +51,7 @@ async function fetchAccessibleResources(http: HttpClient, auth: AuthHandle): Pro
   }
 }
 
-/**
- * Resolve the REST v3 base URL for the connected Jira account, per transport.
- *
- * - **Managed / OAuth:** `accessible-resources` returns ≥1 site → route through the
- *   gateway `https://api.atlassian.com/ex/jira/<cloudId>/rest/api/3`. When
- *   `instanceUrl` is given the matching site is chosen, otherwise the first one (the
- *   `cloudId` comes from the token, so `instanceUrl` need not be supplied here).
- * - **Direct / BYO:** `accessible-resources` needs OAuth and returns nothing → fall
- *   back to the user's own `${instanceUrl}/rest/api/3`. `instanceUrl` is therefore
- *   required for a direct/BYO connection and optional on managed.
- */
+/** Resolve the REST v3 base: the `ex/jira/<cloudId>` gateway on OAuth (a bare site URL 401s), else `instanceUrl`. */
 export async function resolveJiraBase(
   http: HttpClient,
   auth: AuthHandle,
@@ -118,11 +77,7 @@ export async function resolveJiraBase(
   });
 }
 
-/**
- * The "which Jira site" prop. Optional: required for a direct/BYO connection (the
- * base is rooted at it), but ignored on the managed transport where the site is
- * resolved from the OAuth token — see {@link resolveJiraBase}.
- */
+/** The "which Jira site" prop: required for direct/BYO, ignored on managed (see {@link resolveJiraBase}). */
 export function instanceUrlProp() {
   return shortText<false>({
     label: 'Instance URL',
@@ -132,11 +87,7 @@ export function instanceUrlProp() {
   });
 }
 
-/**
- * Wrap plain text in the smallest valid Atlassian Document Format document (one
- * paragraph) — Jira rich-text fields (description, comment body) require ADF, not
- * plain text. Returned as {@link JsonValue} so it drops straight into a request body.
- */
+/** Wrap plain text in a minimal ADF document — Jira rich-text fields reject plain strings. */
 export function textToAdf(text: string): JsonValue {
   return {
     version: 1,
@@ -145,11 +96,7 @@ export function textToAdf(text: string): JsonValue {
   };
 }
 
-/**
- * Jira references a project by numeric `id` or by its human `key` (e.g. `ENG`),
- * and an issue type / priority by `id` or `name`. Without a live picker either is
- * accepted and the reference is shaped as the API expects.
- */
+/** Shape a project reference: all-digits is an `id`, anything else a `key` (e.g. `ENG`). */
 export function projectRef(value: string): JsonValue {
   return /^\d+$/.test(value) ? { id: value } : { key: value };
 }

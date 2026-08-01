@@ -4,13 +4,7 @@ import { FakeTransport, stubAuth } from '../../testing/fakes';
 import { listProjects } from './projects';
 import { addComment, createTask, getTask, listTasks, updateTask } from './tasks';
 
-/**
- * Golden offline tests for the Asana actions. A {@link FakeTransport} replays
- * canned `{ data }`-enveloped API v1 responses and records requests, so the tests
- * assert the envelope wrapping/unwrapping, the project→`projects: [gid]` mapping,
- * PUT partial-update, the `offset` cursor pagination, and the live project picker
- * without a connection.
- */
+/** Golden offline tests for the Asana actions, driven by a {@link FakeTransport}. */
 function fake(handler: (req: NormalizedRequest, i: number) => NormalizedResponse) {
   const transport = new FakeTransport(handler);
   return { auth: stubAuth(transport, 'oauth2'), http: new HttpClient(), transport };

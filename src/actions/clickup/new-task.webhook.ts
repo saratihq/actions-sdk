@@ -10,20 +10,8 @@ import { CLICKUP_API_BASE, type ClickupTask, clickupAuth, listOptions, listTeams
 export const NEW_TASK_TYPE = 'clickup.new_task';
 
 /**
- * A REGISTERED webhook trigger for ClickUp task creation. ClickUp registers a
- * webhook per workspace ("team") via the public API and **mints the signing
- * secret itself** (returned in the create response) — so `onEnable` persists
- * that secret to the trigger store and `onRequest` verifies the `X-Signature`
- * HMAC against it before trusting the payload.
- *
- * ClickUp's `taskCreated` delivery carries only `task_id` (not the task body), so
- * the transform fetches the task to hand workflows a useful, trimmed event.
- *
- * Docs: https://developer.clickup.com/reference/createwebhook +
- *       https://developer.clickup.com/docs/webhooksignature
- *  - POST /api/v2/team/{team_id}/webhook { endpoint, events, list_id? } → { id, webhook { id, secret } }
- *  - `X-Signature`: hex HMAC-SHA256 of the RAW body, keyed by the returned secret (no prefix)
- *  - DELETE /api/v2/webhook/{webhook_id}
+ * A registered webhook trigger for ClickUp task creation. ClickUp MINTS the signing secret itself,
+ * so `onEnable` persists it and `onRequest` (not `verify`) checks the `X-Signature` HMAC.
  */
 
 /** The store key the provider-generated signing secret is persisted under (per trigger). */
@@ -103,10 +91,7 @@ export const newTask = defineTrigger({
     status: 'to do',
     url: 'https://app.clickup.com/t/9hz',
   },
-  /**
-   * Register a team-level webhook subscribed to `taskCreated` (optionally scoped to
-   * one list), then persist the secret ClickUp returns for later verification.
-   */
+  /** Register a team-level `taskCreated` webhook, then persist the secret ClickUp returns. */
   async onEnable({ http, auth, props, webhookUrl, store }): Promise<WebhookRegistration> {
     const body: Record<string, JsonValue> = { endpoint: webhookUrl, events: ['taskCreated'] };
     if (props.listId !== undefined) body.list_id = props.listId;
@@ -139,12 +124,7 @@ export const newTask = defineTrigger({
       throw new Error(`ClickUp webhook delete failed: HTTP ${res.status}`);
     }
   },
-  /**
-   * Verify the `X-Signature` HMAC against the persisted secret, then transform.
-   * Verification lives here (not in `verify`) because the secret is provider-minted
-   * and read from the trigger store, which `verify` has no access to. ClickUp's
-   * payload carries only `task_id`, so the task is fetched to enrich the event.
-   */
+  /** Verification lives here, not in `verify`, because the provider-minted secret is in the store. */
   async onRequest({ request, store, http, auth }): Promise<ClickupTaskEvent[]> {
     const secret = await store.get<string>(SIGNING_SECRET_KEY);
     if (!secret || !verifyClickupSignature(request, secret)) {
@@ -166,8 +146,7 @@ export const newTask = defineTrigger({
       ...(body.webhook_id ? { webhookId: body.webhook_id } : {}),
     };
 
-    // Enrich from the task itself (the delivery has no task body). Best-effort: a
-    // failed/absent fetch still fires the event with the id workflows can act on.
+    // The delivery has no task body. Best-effort enrichment: a failed fetch still fires the event.
     const task = await http.get<ClickupTask>(`${CLICKUP_API_BASE}/task/${encodeURIComponent(taskId)}`, {
       auth,
       throwOnError: false,

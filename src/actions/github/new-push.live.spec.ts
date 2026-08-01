@@ -8,19 +8,8 @@ import { newPush } from './new-push.webhook';
 import { signGithubBody, verifyGithubSignature } from './signature';
 
 /**
- * LIVE proof of the REGISTERED-webhook half of the trigger contract. Against a
- * real GitHub repo it runs the full lifecycle end to end:
- *
- *   onEnable → GitHub creates a real repo webhook (real REST POST)
- *            → GET confirms it exists, pointed at the configured URL, subscribed to push
- *   signature cross-check → GitHub signs the `ping` it delivers with the trigger's secret;
- *            the test fetches that delivery and proves `verifyGithubSignature` accepts
- *            GitHub's own X-Hub-Signature-256, and rejects a tampered copy
- *   onDisable → GitHub deletes the webhook (real REST DELETE) → GET is 404
- *
- * Gated behind ORCHESTR_LIVE plus GITHUB_LIVE_TOKEN (a PAT/OAuth token with
- * `repo`) and GITHUB_TEST_REPO (`owner/repo`). Self-skips with a printed reason
- * otherwise, so `pnpm test` stays green offline and never fakes the proof.
+ * LIVE registration lifecycle (onEnable → signature cross-check → onDisable) against a real repo.
+ * Gated by ORCHESTR_LIVE plus GITHUB_LIVE_TOKEN (needs `repo`) and GITHUB_TEST_REPO (`owner/repo`).
  */
 const token = process.env.GITHUB_LIVE_TOKEN;
 const repoSlug = process.env.GITHUB_TEST_REPO;
@@ -55,9 +44,7 @@ describeLive(
     const [owner, repo] = (repoSlug ?? '/').split('/');
     const auth = createDirectAuth(githubTokenAuth, { type: 'bearer', token: token ?? '' });
     const http = new HttpClient();
-    // A REACHABLE sink (returns 200) so GitHub actually delivers — and signs — the
-    // creation `ping`, giving the deliveries API a real signed record to verify
-    // against. GITHUB_TEST_SINK_URL overrides it (e.g. a webhook.site url).
+    // Must be a REACHABLE sink, or GitHub never delivers (and signs) the `ping` this test verifies.
     const webhookUrl = process.env.GITHUB_TEST_SINK_URL || 'https://httpbin.org/post';
     const secret = `live-secret-${Math.random().toString(36).slice(2)}`;
 
@@ -98,11 +85,8 @@ describeLive(
     }, 30_000);
 
     it("verify() accepts GitHub's own signature on the ping it delivered, and rejects a tamper", async () => {
-      // GitHub delivers a signed `ping` a few seconds after creation; until the
-      // first delivery is recorded the deliveries endpoint itself 404s, so poll
-      // tolerantly. Delivery ids are 64-bit and exceed JS's safe integer, so read
-      // the ping's id as a STRING off the raw JSON (JSON.parse would round it and
-      // the detail fetch would 404 on the wrong id).
+      // Delivery ids are 64-bit and exceed JS's safe integer, so the id must be read as a STRING
+      // off the raw JSON — JSON.parse would round it and the detail fetch would 404.
       const doFetch = resolveFetch();
       const listUrl = `${GITHUB_API_BASE}/repos/${owner}/${repo}/hooks/${subscriptionId}/deliveries?per_page=30`;
       let ping: DeliveryDetail | null = null;
@@ -131,10 +115,7 @@ describeLive(
       expect(githubSig).toMatch(/^sha256=/);
       if (!githubSig) throw new Error('ping delivery carried no X-Hub-Signature-256');
 
-      // The real proof: GitHub computed X-Hub-Signature-256 as HMAC-SHA256 of the
-      // exact bytes it POSTed, keyed by the trigger's secret. Node's `JSON.stringify` emits
-      // the same compact bytes GitHub signed, so verify() — handed GitHub's own
-      // header over the re-serialised body — must accept it. A flipped byte rejects.
+      // `JSON.stringify` reproduces the exact compact bytes GitHub signed, so verify() must accept them.
       const rawBody = JSON.stringify(ping?.request.payload ?? {});
       const authentic = {
         headers: { 'x-hub-signature-256': githubSig },

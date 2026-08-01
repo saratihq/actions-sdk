@@ -12,11 +12,7 @@ const LATEST_CURSOR: NormalizedResponse = {
   data: { cursor: 'AAF...BASELINE' },
 };
 
-/**
- * A real Dropbox `list_folder/continue` response (shape from the HTTP
- * docs): `.tag`-discriminated entries — one file, one folder — plus the advanced
- * cursor and `has_more: false`.
- */
+/** A real `list_folder/continue` response: `.tag`-discriminated entries plus the advanced cursor. */
 const CHANGES: NormalizedResponse = {
   status: 200,
   headers: {},

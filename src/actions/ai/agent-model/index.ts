@@ -6,15 +6,7 @@ import { mistralAgentAdapter, openaiAgentAdapter } from './chat-completions';
 import { geminiAgentAdapter } from './gemini';
 import type { AgentModelAdapter, AgentModelRequest, AgentModelResult, AgentProvider } from './types';
 
-/**
- * The tool-aware model call the agent loop drives. It serializes the running
- * conversation + bound tools into ONE provider's multi-turn tool-calling body,
- * POSTs it over the SDK http client (the opaque {@link AuthHandle} transport
- * injects the credential — the primitive never reads it), and parses the reply
- * into the normalized `{ text | toolCalls[] } + usage` turn the loop expects. A
- * loop-internal engine primitive, NOT a catalog action — exported for a host
- * runtime to bind into its agent loop, never registered.
- */
+/** The tool-aware model call the agent loop drives — an engine primitive, never a catalog action. */
 
 const ADAPTERS: Record<AgentProvider, AgentModelAdapter> = {
   claude: anthropicAgentAdapter,
@@ -23,10 +15,7 @@ const ADAPTERS: Record<AgentProvider, AgentModelAdapter> = {
   gemini: geminiAgentAdapter,
 };
 
-/**
- * Generate one agent turn against `req.provider`. Throws `invalid_input` for an
- * unknown provider and surfaces the http client's normalized failures unchanged.
- */
+/** Generate one agent turn against `req.provider`; throws `invalid_input` for an unknown provider. */
 export async function callAgentModel(
   req: AgentModelRequest,
   auth: AuthHandle,

@@ -4,20 +4,7 @@ import { createDirectAuth } from '../auth-factories';
 import { liveDescribe } from '../../testing/live';
 import { HttpClient } from './client';
 
-/**
- * LIVE proof of the file transfer path end to end, over the DIRECT transport
- * against a REAL server (httpbin.org) — no mocks, real bytes on the wire:
- *
- *   step A: GET /image/png            → download real binary bytes
- *   (pass) the bytes become the next step's input, exactly as a run scope would
- *   step B: POST /post (multipart)    → upload them; httpbin echoes the received
- *                                        file back base64, so the test checksum-
- *                                        asserts the uploaded bytes === downloaded
- *
- * This is the SDK half of the "download → pass → upload" cycle the runtime wires
- * step-to-step. Gated behind ORCHESTR_LIVE (no credentials needed — a public
- * endpoint on the bring-your-own/direct transport).
- */
+/** LIVE download → pass → upload proof over the direct transport against httpbin.org; gated behind ORCHESTR_LIVE. */
 liveDescribe('file rail — live download → multipart upload (httpbin, direct rail)', () => {
   const auth = createDirectAuth({ type: 'none' }, { type: 'none' });
   const http = new HttpClient({ defaultTimeoutMs: 20_000 });

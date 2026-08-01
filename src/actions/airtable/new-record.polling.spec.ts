@@ -5,10 +5,7 @@ import { type AirtableRecordEvent, newRecord } from './new-record.polling';
 
 const PROPS = { baseId: 'appXYZ123', tableId: 'Tasks' };
 
-/**
- * A REAL Airtable list-records response envelope (shape from the public
- * list-records docs): `{ records: [{ id, createdTime, fields }] }`.
- */
+/** A real Airtable list-records envelope: `{ records: [{ id, createdTime, fields }] }`. */
 const RECORDS_RESPONSE: NormalizedResponse = {
   status: 200,
   headers: {},

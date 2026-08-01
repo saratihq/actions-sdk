@@ -90,10 +90,7 @@ export const listCustomers = defineAction({
   },
 });
 
-/**
- * Search customers with Stripe's search query language, e.g.
- * `email:'jane@acme.com'` or `name~"acme"`. Returns one page.
- */
+/** Search customers with Stripe's search query language, e.g. `email:'jane@acme.com'`; returns one page. */
 export const searchCustomers = defineAction({
   type: SEARCH_CUSTOMERS_TYPE,
   name: 'Search customers',

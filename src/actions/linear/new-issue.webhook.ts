@@ -5,22 +5,8 @@ import { dropdown } from '../../core/props';
 import { defineTrigger, type WebhookRegistration, type WebhookRequest } from '../../core/trigger';
 import { linearAuth, linearGraphql, teamOptions } from './common';
 
-/** Public type for the registered-webhook trigger. */
+/** Registered-webhook trigger for the `Issue` resource — one subscription covers create/update/remove. */
 export const NEW_ISSUE_TYPE = 'linear.new_issue';
-
-/**
- * A REGISTERED webhook trigger for Linear issues. Linear generates the signing
- * secret itself and returns it from `webhookCreate` — so `onEnable` persists that
- * provider secret to the trigger store, and `onRequest` verifies the
- * `Linear-Signature` HMAC against it before trusting the payload. Linear delivers
- * create/update/remove for the `Issue` resource on one subscription; the transform
- * carries `action` so a workflow filters (e.g. to `create`) downstream.
- *
- * Docs: https://linear.app/developers/webhooks
- *  - webhookCreate(input: { url, resourceTypes, teamId | allPublicTeams }) → { webhook { id, secret } }
- *  - `Linear-Signature`: hex-encoded HMAC-SHA256 of the RAW body, keyed by webhook.secret
- *  - webhookDelete(id) removes it
- */
 
 /** The store key the provider-generated signing secret is persisted under (per trigger). */
 const SIGNING_SECRET_KEY = 'signingSecret';
@@ -111,10 +97,7 @@ export const newIssue = defineTrigger({
     actor: 'Sarah Chen',
     webhookTimestamp: 1706107938084,
   },
-  /**
-   * Create a Linear webhook for the `Issue` resource pointed at the intake URL, then
-   * persist the secret Linear returns so `onRequest` can verify deliveries.
-   */
+  /** Register the webhook and persist the secret Linear mints, so `onRequest` can verify deliveries. */
   async onEnable({ http, auth, props, webhookUrl, store }): Promise<WebhookRegistration> {
     const input: Record<string, unknown> = {
       url: webhookUrl,
@@ -127,7 +110,6 @@ export const newIssue = defineTrigger({
     const data = await linearGraphql<WebhookCreatePayload>(http, auth, WEBHOOK_CREATE, { input });
     const { id, secret } = data.webhookCreate.webhook;
     await store.set(SIGNING_SECRET_KEY, secret);
-    // The secret rides along in the handle too (JSON-serialisable) for teardown/debug.
     return { subscriptionId: id, signingSecret: secret };
   },
   /** Delete the Linear webhook. Any error (already gone) is swallowed — teardown is idempotent. */
@@ -140,11 +122,7 @@ export const newIssue = defineTrigger({
       // Already deleted / not found — teardown is best-effort idempotent.
     }
   },
-  /**
-   * Verify the `Linear-Signature` HMAC against the persisted secret, then transform.
-   * Verification lives here (not in `verify`) because the secret is provider-minted
-   * and read from the trigger store, which `verify` has no access to.
-   */
+  /** Verification lives here, not in `verify`: the provider-minted secret is only reachable via the store. */
   async onRequest({ request, store }): Promise<LinearIssueEvent[]> {
     const secret = await store.get<string>(SIGNING_SECRET_KEY);
     if (!secret || !verifyLinearSignature(request, secret)) {

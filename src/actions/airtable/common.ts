@@ -4,20 +4,11 @@ import { cursorInBody, paginate } from '../../core/http/pagination';
 import type { JsonValue } from '../../core/http/types';
 import { checkbox, type DropdownOption } from '../../core/props';
 
-/**
- * Shared Airtable building blocks: Airtable's `/v0` REST endpoints, the Bearer
- * PAT auth, the `{ records, offset }` / `{ bases, offset }` envelopes, and the
- * `offset` cursor are Airtable's public API contract. Airtable takes and returns
- * JSON, so writes work directly.
- */
+/** Shared Airtable building blocks: `/v0` endpoints, Bearer PAT auth, and the `offset` cursor envelopes. */
 
 export const AIRTABLE_API_BASE = 'https://api.airtable.com/v0';
 
-/**
- * Airtable authenticates with a personal access token as a Bearer credential;
- * managed OAuth attaches its token the same way. Declared as an `apiKey` header
- * scheme so both transports run identical action code.
- */
+/** PAT or managed-OAuth token, both as a Bearer header — one `apiKey` scheme so both transports share code. */
 export const airtableAuth: ApiKeyScheme = {
   type: 'apiKey',
   in: 'header',
@@ -32,7 +23,7 @@ export interface AirtableBase {
   permissionLevel?: string;
 }
 
-/** An Airtable record. `fields` is open — the shape is the table's, not the SDK's. */
+/** An Airtable record; `fields` is open — the shape is the table's, not the SDK's. */
 export interface AirtableRecord {
   id: string;
   createdTime: string;
@@ -44,12 +35,7 @@ interface BasesEnvelope {
   offset?: string;
 }
 
-/**
- * List every base the token can see, following Airtable's `offset` cursor to
- * completion. Shared by the `list_bases` action and the base picker — the offset
- * lives in the body and writes back onto the same URL's query, so the SDK's
- * `cursorInBody` helper covers it.
- */
+/** List every base the token can see, following Airtable's body-carried `offset` cursor to completion. */
 export function listAirtableBases(http: HttpClient, auth: AuthHandle): Promise<AirtableBase[]> {
   return paginate<AirtableBase>({
     http,
@@ -61,7 +47,7 @@ export function listAirtableBases(http: HttpClient, auth: AuthHandle): Promise<A
   });
 }
 
-/** Live base picker — independent of any other prop, so it works under today's loader contract. */
+/** Live base picker — must stay independent of other props, per the loader contract. */
 export async function baseOptions(http: HttpClient, auth: AuthHandle): Promise<DropdownOption<string>[]> {
   const bases = await listAirtableBases(http, auth);
   return bases.map((base) => ({ label: base.name, value: base.id }));

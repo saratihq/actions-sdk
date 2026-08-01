@@ -2,12 +2,9 @@ import { ActionError } from '../../../core/errors';
 import { asRecord } from '../generate-text';
 import type { AgentConversationMessage, AgentUsage } from './types';
 
-/**
- * Cross-provider serialization helpers shared by the four adapters. Kept in one
- * place so a change to the tool-result round-trip rule lands once.
- */
+/** Cross-provider serialization helpers shared by the four adapters. */
 
-/** The one failure raised when a provider response lacks the expected message/candidate. */
+/** Raised when a provider response lacks the expected message/candidate. */
 export function throwNoTurn(label: string): never {
   throw new ActionError({
     code: 'provider_error',
@@ -16,12 +13,7 @@ export function throwNoTurn(label: string): never {
   });
 }
 
-/**
- * Map every prior tool-call id → the tool name that was called, scanning the
- * assistant turns the loop echoed back. Providers that thread tool results by id
- * (OpenAI/Anthropic/Mistral) carry the id directly; Gemini threads by NAME, so
- * its adapter resolves the name from a `tool` turn's `toolCallId` through here.
- */
+/** Map prior tool-call id → tool name; Gemini threads tool results by NAME and resolves through here. */
 export function toolNamesById(messages: readonly AgentConversationMessage[]): Map<string, string> {
   const names = new Map<string, string>();
   for (const message of messages) {
@@ -38,8 +30,7 @@ export function parseToolArguments(raw: unknown): unknown {
   try {
     return JSON.parse(raw);
   } catch {
-    // A model very rarely emits invalid JSON arguments; keep the raw text rather
-    // than lose the call — the tool's own schema validation surfaces the problem.
+    // Keep the raw text rather than lose the call; the tool's schema validation surfaces it.
     return raw;
   }
 }
@@ -50,11 +41,7 @@ function tokenCount(usage: Record<string, unknown> | undefined, key: string): nu
   return typeof value === 'number' ? value : undefined;
 }
 
-/**
- * Normalize a provider usage block to {@link AgentUsage}, given each provider's
- * input/output field names. `totalTokens` is taken from `totalKey` when present,
- * else summed from input+output so the loop can always meter a turn.
- */
+/** Normalize a provider usage block to {@link AgentUsage}; `totalTokens` falls back to input+output. */
 export function normalizeUsage(
   data: unknown,
   block: string,

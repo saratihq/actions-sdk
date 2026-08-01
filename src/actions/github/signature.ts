@@ -3,15 +3,8 @@ import { createHmac, timingSafeEqual } from 'node:crypto';
 import type { WebhookRequest } from '../../core/trigger';
 
 /**
- * Verify a GitHub webhook signature (the `sha256` scheme). GitHub signs the
- * raw request body with the hook's shared secret and sends the result as
- * `X-Hub-Signature-256: sha256=<hex>`. Comparison is timing-safe. Returns false
- * (never throws) for any missing/malformed input — a spoofed or unsigned
- * request must fail closed, not crash into a different code path.
- *
- * Unlike Slack, GitHub sends no timestamp, so there is no replay window to
- * enforce here; the shared secret + per-delivery `X-GitHub-Delivery` dedup is
- * the protection the contract relies on.
+ * Verify `X-Hub-Signature-256` (timing-safe). Returns false, never throws, on any malformed input —
+ * an unsigned or spoofed request must fail CLOSED.
  */
 export function verifyGithubSignature(request: WebhookRequest, secret: string): boolean {
   if (!secret) return false;

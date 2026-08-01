@@ -3,20 +3,12 @@ import type { JsonValue } from '../../core/http/types';
 import { dropdown, json, shortText } from '../../core/props';
 import { HUBSPOT_API_BASE, type HubspotObject, hubspotAuth, ownerOptions, pipelineOptions } from './common';
 
-/**
- * Public type — a stable public catalog id. Action namespaces use underscores
- * (`create_deal`); hyphens are invalid.
- */
+/** Public catalog id — underscore form, since the action namespace forbids hyphens. */
 export const CREATE_DEAL_TYPE = 'hubspot.create_deal';
 
 const DEALS_URL = `${HUBSPOT_API_BASE}/crm/v3/objects/deals`;
 
-/**
- * Create a deal. The **pipeline picker is live** (deal pipelines are
- * prop-independent) and so is the owner picker; `dealstage` is a stage id within
- * the chosen pipeline, so it stays a text input until the loader contract can
- * read the selected pipeline.
- */
+/** Create a deal; `dealstage` is free text because the loader contract cannot read the chosen pipeline. */
 export const createDeal = defineAction({
   type: CREATE_DEAL_TYPE,
   name: 'Create deal',

@@ -3,11 +3,7 @@ import type { HttpClient } from '../../core/http/client';
 import type { JsonValue } from '../../core/http/types';
 import type { DropdownOption } from '../../core/props';
 
-/**
- * Shared Notion building blocks: the `/v1` endpoints, Bearer auth, the required
- * `Notion-Version` header, and the rich-text `title` shape are Notion's public
- * contract. JSON throughout.
- */
+/** Shared Notion `/v1` building blocks: Bearer auth, the required version header, rich-text titles. */
 
 export const NOTION_API_BASE = 'https://api.notion.com/v1';
 
@@ -53,11 +49,7 @@ export function plainTitle(object: NotionObject): string {
   return text.length > 0 ? text : 'Untitled';
 }
 
-/**
- * Live database picker. Independent of any other prop — it searches objects
- * filtered to databases — so it works under today's loader contract and honours
- * the loader `search` term.
- */
+/** Live database picker (prop-independent, per the loader contract); honours the loader `search` term. */
 export async function databaseOptions(
   http: HttpClient,
   auth: AuthHandle,
@@ -75,13 +67,7 @@ export async function databaseOptions(
   return res.data.results.map((database) => ({ label: plainTitle(database), value: database.id }));
 }
 
-/**
- * Follow Notion's `start_cursor` list pagination to completion (capped),
- * collecting objects up to `maxResults`. Notion pages inside a POST body — the
- * cursor is `start_cursor` in, `next_cursor`/`has_more` out — so this is a small
- * hand-rolled POST loop rather than the GET-oriented `paginate` helper. `maxPages`
- * is a hard safety cap against a runaway cursor.
- */
+/** Walk Notion's in-body `start_cursor` pagination up to `maxResults`; `maxPages` caps a runaway cursor. */
 export async function collectNotionQuery(
   http: HttpClient,
   auth: AuthHandle,

@@ -2,10 +2,7 @@ import { defineAction } from '../../core/action';
 import { number } from '../../core/props';
 import { fetchStories, type HackerNewsItem } from './common';
 
-/**
- * Fetch the current top stories from Hacker News — a no-auth read of the public
- * Firebase API.
- */
+/** Fetch the current top stories from Hacker News — a no-auth read of the public Firebase API. */
 
 export const FETCH_TOP_STORIES_TYPE = 'hackernews.fetch_top_stories';
 export interface FetchTopStoriesResult {

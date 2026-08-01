@@ -5,11 +5,8 @@ import type { HttpMethod, JsonValue, QueryValue } from '../../core/http/types';
 import { checkbox, dropdown, json, shortText } from '../../core/props';
 
 /**
- * HTTP utilities — a no-auth ("none" scheme) native app. `http.send_request` is
- * load-bearing (the IR generator emits it), so its public type is kept
- * byte-identical to the platform's existing catalog id. Because the scheme is
- * `none` the request rides the direct transport with no credential attached —
- * callers bring their own auth via the `headers` prop.
+ * HTTP utilities — no-auth actions; callers bring their own credentials via `headers`.
+ * `http.send_request`'s public type is load-bearing (the IR generator emits it) — never rename it.
  */
 
 /** Coerce a JSON object into a string→string header map. */
@@ -83,9 +80,7 @@ export const sendRequest = defineAction({
   },
   async run({ auth, props, http }): Promise<SendRequestResult> {
     const method = props.method ?? 'GET';
-    // SSRF guard: this URL is fully user-controlled and rides the no-auth direct
-    // transport, so a workflow could otherwise reach internal services or cloud
-    // metadata. Public destinations pass; operators opt internal hosts back in.
+    // SSRF guard: this URL is fully user-controlled, so block private/internal targets before fetching.
     await guardUserUrl(props.url);
     const res = await http.request(method, props.url, {
       auth,

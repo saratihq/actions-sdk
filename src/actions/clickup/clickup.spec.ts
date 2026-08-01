@@ -3,12 +3,7 @@ import type { NormalizedRequest, NormalizedResponse } from '../../core/http/type
 import { FakeTransport, stubAuth } from '../../testing/fakes';
 import { createTask, getTask, listTasks, updateTask } from './tasks';
 
-/**
- * Offline tests for the ClickUp actions. A {@link FakeTransport} replays canned
- * API v2 responses and records requests, asserting the create body, PUT
- * partial-update, the `page`/`last_page` cursor, and the hierarchy-walking list
- * picker (team → space → folderless lists + folder lists) without a connection.
- */
+/** Offline tests for the ClickUp actions, driven by a {@link FakeTransport}. */
 function fake(handler: (req: NormalizedRequest, i: number) => NormalizedResponse) {
   const transport = new FakeTransport(handler);
   return { auth: stubAuth(transport, 'apiKey'), http: new HttpClient(), transport };

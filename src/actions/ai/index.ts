@@ -1,8 +1,4 @@
-/**
- * The LLM `generate_text` family — one action per provider, all built from the
- * shared {@link makeGenerateText} factory. Each `type` is `<slug>.generate_text`
- * where the slug (openai | claude | gemini | mistral) also drives the brand icon.
- */
+/** The LLM `generate_text` family — one `<slug>.generate_text` action per provider. */
 export {
   type GenerateInput,
   type GenerateTextOutput,
@@ -22,11 +18,7 @@ import { openaiGenerateText } from './openai';
 /** Every AI action, flattened for catalog registration. */
 export const aiActions = [openaiGenerateText, claudeGenerateText, geminiGenerateText, mistralGenerateText];
 
-/**
- * The tool-aware model call for the AI Agent node. A loop-internal engine
- * primitive driven by the host agent loop — deliberately NOT in {@link aiActions}
- * (it is never a catalog action).
- */
+/** Tool-aware model call for the AI Agent node — engine primitive, deliberately NOT a catalog action. */
 export {
   type AgentConversationMessage,
   type AgentModelAdapter,

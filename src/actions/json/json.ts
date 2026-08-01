@@ -5,10 +5,7 @@ import { ActionError } from '../../core/errors';
 import type { JsonValue } from '../../core/http/types';
 import { checkbox, json, longText, number, shortText } from '../../core/props';
 
-/**
- * JSON utilities — no-auth (`none` scheme) actions. The core transforms are
- * dependency-free; `run_jsonata_query` uses `jsonata` (MIT).
- */
+/** JSON utilities — no-auth actions; `run_jsonata_query` uses `jsonata` (MIT). */
 
 function isPlainObject(value: JsonValue): value is { [k: string]: JsonValue } {
   return typeof value === 'object' && value !== null && !Array.isArray(value);

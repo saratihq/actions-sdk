@@ -71,11 +71,8 @@ describe('gmail.new_email polling trigger', () => {
     const store = new MemoryStore();
     const { events } = await newEmail.runPoll({ auth: stubAuth(transport), props: {}, store });
 
-    // No watermark → pure baseline: zero events and NOT a single list/get call, so
-    // activating the trigger never fans out the existing inbox as historical runs.
     expect(events).toEqual([]);
     expect(transport.requests).toHaveLength(0);
-    // The SDK records the watermark so the next poll bounds by `after:`.
     expect(typeof store.snapshot().lastPolledAt).toBe('string');
   });
 
@@ -138,8 +135,7 @@ describe('gmail.new_email polling trigger', () => {
       internalDate: '1',
       payload: { headers: [] },
     });
-    // A burst of 3 new messages spread across TWO list pages (page 1 hands back a
-    // nextPageToken). The old head-window poll would have stopped at page 1.
+    // A burst of 3 new messages spread across TWO list pages.
     const burst = new FakeTransport((request: NormalizedRequest): NormalizedResponse => {
       const url = request.url;
       const get = /\/messages\/([^/?]+)/.exec(url);
@@ -156,20 +152,16 @@ describe('gmail.new_email polling trigger', () => {
 
     const second = await newEmail.runPoll({ auth: stubAuth(burst), props: {}, store });
     expect(second.events.map((e) => e.id)).toEqual(['b1', 'b2', 'b3']);
-    // The window is bounded by `after:` (the watermark), not a bare head window.
     expect(decodeURIComponent(burst.requests[0]!.url)).toContain('after:');
-    // Both list pages were walked (page 1 + page 2 via nextPageToken).
     const listCalls = burst.requests.filter((r) => !/\/messages\//.test(r.url));
     expect(listCalls).toHaveLength(2);
   });
 
   it('dedupes by message id and skips re-fetching seen ids on the next poll', async () => {
     const store = new MemoryStore();
-    // Baseline (INV-1): the first poll emits nothing and reads no history.
     const baseline = await newEmail.runPoll({ auth: stubAuth(gmailTransport()), props: {}, store });
     expect(baseline.events).toEqual([]);
 
-    // The next poll (watermark set) surfaces the two messages as new events.
     const first = await newEmail.runPoll({ auth: stubAuth(gmailTransport()), props: {}, store });
     expect(first.events.map((e) => e.id)).toEqual(['18f1a2b3c4d5e6f7', '18f0999888777666']);
 

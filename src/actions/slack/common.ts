@@ -1,11 +1,6 @@
 import type { OAuth2Scheme } from '../../core/auth';
 import { ActionError } from '../../core/errors';
 
-/**
- * Shared Slack building blocks: the endpoints, scopes, and the `ok`/`error`
- * envelope convention from Slack's public API.
- */
-
 export const SLACK_API_BASE = 'https://slack.com/api';
 
 /** The OAuth2 scheme actions declare; connect-UI metadata only — the token is attached by the transport. */
@@ -31,12 +26,7 @@ const RETRYABLE_SLACK_ERRORS = new Set([
   'fatal_error',
 ]);
 
-/**
- * Slack signals failure as HTTP 200 with `{ ok: false, error }` — invisible to
- * HTTP-status checks. Convert that into the SDK's one failure shape so a Slack
- * `channel_not_found` is a structured, non-retryable error, and `ratelimited`
- * is retryable, exactly like a real HTTP 4xx/5xx.
- */
+/** Slack signals failure as HTTP 200 with `{ ok: false, error }`, so every call must funnel through this to become an `ActionError`. */
 export function assertSlackOk<T extends SlackEnvelope>(data: T): T {
   if (data.ok) return data;
   const error = data.error ?? 'unknown_error';

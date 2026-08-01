@@ -4,19 +4,7 @@ import { FakeTransport, stubAuth } from '../../testing/fakes';
 import { addComment, listComments } from './comments';
 import { createIssue, getIssue, searchIssues, updateIssue } from './issues';
 
-/**
- * Golden offline tests for the Jira actions. A {@link FakeTransport} replays canned
- * Jira REST v3 responses and records the requests the actions built, so the tests
- * assert both the request shaping (base resolution, ADF, refs, JQL) and the
- * response shaping without a live connection.
- *
- * Base resolution is transport-aware: every action first GETs Atlassian's
- * `accessible-resources`. On the managed/OAuth transport that returns the site(s)
- * the token can reach, and the base becomes the gateway
- * `https://api.atlassian.com/ex/jira/<cloudId>/rest/api/3`; on the direct/basic
- * transport the endpoint 401s and the base falls back to `${instanceUrl}/rest/api/3`.
- * Both transports are exercised below. Live verification: `jira.live.spec.ts`.
- */
+/** Offline tests for the Jira actions — both base-resolution transports (gateway and site URL) are exercised. */
 const INSTANCE = 'https://orchestrflow.atlassian.net';
 const CLOUD_ID = 'b828af84-c9db-4ac5-bc7d-a07b26422193';
 const GATEWAY_BASE = `https://api.atlassian.com/ex/jira/${CLOUD_ID}/rest/api/3`;
@@ -27,11 +15,7 @@ function fake(handler: (req: NormalizedRequest, callIndex: number) => Normalized
   return { auth: stubAuth(transport, 'basic'), http: new HttpClient(), transport };
 }
 
-/**
- * Managed/OAuth transport: `accessible-resources` returns one site → the base
- * resolves to the gateway. `onCall` handles the action's real request(s) after
- * resolution.
- */
+/** Managed/OAuth transport: `accessible-resources` returns one site → the base resolves to the gateway. */
 function managed(onCall: (req: NormalizedRequest, callIndex: number) => NormalizedResponse) {
   return fake((req, callIndex) => {
     if (req.url === ACCESSIBLE_RESOURCES_URL) {
@@ -45,10 +29,7 @@ function managed(onCall: (req: NormalizedRequest, callIndex: number) => Normaliz
   });
 }
 
-/**
- * Direct/basic transport: `accessible-resources` needs OAuth and 401s → the base
- * falls back to the site URL. Proves the direct/BYO transport does not regress.
- */
+/** Direct/basic transport: `accessible-resources` 401s → the base falls back to the site URL. */
 function direct(onCall: (req: NormalizedRequest, callIndex: number) => NormalizedResponse) {
   return fake((req, callIndex) => {
     if (req.url === ACCESSIBLE_RESOURCES_URL) {

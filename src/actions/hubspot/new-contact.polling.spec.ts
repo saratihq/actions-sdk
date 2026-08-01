@@ -3,11 +3,7 @@ import { FakeTransport, stubAuth } from '../../testing/fakes';
 import { MemoryStore } from '../../testing/memory-store';
 import { newContact } from './new-contact.polling';
 
-/**
- * A CRM v3 contacts-search response — shape from HubSpot's public search docs
- * (`results[]` with id/properties/createdAt, `paging.next.after`).
- * https://developers.hubspot.com/docs/guides/api/crm/search
- */
+/** A CRM v3 contacts-search response: `results[]` with id/properties/createdAt, plus `paging.next.after`. */
 function searchResponse(results: unknown[], nextAfter?: string): NormalizedResponse {
   return {
     status: 200,
@@ -54,11 +50,7 @@ const OVERLAP_MS = 60_000;
 /** A cursor watermark (epoch-millis) as the trigger persists it. */
 const CURSOR_MS = Date.parse('2024-01-17T21:00:00.000Z');
 
-/**
- * A store already past its first poll: `lastPolledAt` present (so `poll` runs its
- * normal bounded read instead of self-baselining) and a `cursor` epoch-millis
- * watermark set. Mirrors the runtime state after activation + one baseline poll.
- */
+/** A store already past its first poll, so `poll` runs its normal bounded read instead of baselining. */
 async function primedStore(): Promise<MemoryStore> {
   const store = new MemoryStore();
   await store.set('lastPolledAt', '2026-07-20T00:00:00.000Z');
@@ -73,11 +65,8 @@ describe('hubspot.new_contact — polling', () => {
 
     const { events } = await newContact.runPoll({ auth: stubAuth(transport), props: {}, store });
 
-    // Empty watermark → pure baseline: zero events and NOT a single API call, so
-    // activating never backfills the portal's existing contacts.
     expect(events).toEqual([]);
     expect(transport.requests).toHaveLength(0);
-    // The cursor is persisted so the next poll reads forward from "now".
     expect(typeof store.snapshot().cursor).toBe('number');
     expect(typeof store.snapshot().lastPolledAt).toBe('string');
   });
@@ -97,11 +86,9 @@ describe('hubspot.new_contact — polling', () => {
     const filter = body.filterGroups[0]?.filters[0];
     expect(filter?.propertyName).toBe('createdate');
     expect(filter?.operator).toBe('GT');
-    // Epoch-millis STRING, re-scanning a full 60s behind the watermark so a
-    // late-indexed / out-of-order contact is never permanently dropped.
+    // An epoch-millis STRING, a full 60s behind the watermark so a late-indexed contact is never dropped.
     expect(filter?.value).toBe(String(CURSOR_MS - OVERLAP_MS));
     expect(typeof filter?.value).toBe('string');
-    // Guard the fix: the old 2s overlap would have dropped index-lagged contacts.
     expect(filter?.value).not.toBe(String(CURSOR_MS - 2_000));
     expect(body.sorts[0]).toEqual({ propertyName: 'createdate', direction: 'ASCENDING' });
     expect(body.limit).toBe(100);

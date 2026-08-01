@@ -2,12 +2,7 @@ import { defineTrigger } from '../../core/trigger';
 import { dropdown } from '../../core/props';
 import { fetchStories, type HackerNewsItem, type StoryList } from './common';
 
-/**
- * Polling trigger (`hackernews.new_story`) — fires when a new story enters the
- * chosen Hacker News list. On each poll it fetches the head of the list and the
- * SDK's `runPoll` dedupes by story id, so only stories not seen before fire (the
- * polling contract). No-auth.
- */
+/** Fires when a new story enters the chosen list; each poll reads the head and the SDK dedupes by id. */
 
 export const NEW_STORY_TYPE = 'hackernews.new_story';
 /** Head-of-list window sampled per poll — new stories appear at the top. */

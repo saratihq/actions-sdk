@@ -5,11 +5,7 @@ import { type NotionPageEvent, newPage } from './new-page.polling';
 
 const PROPS = { databaseId: '2f26ee68-df30-4251-aad4-8ddc420cba3d' };
 
-/**
- * A real Notion database-query response (shape from the public
- * post-database-query docs): a `list` of `page` objects each with a top-level
- * `id`, `created_time`, `last_edited_time`, `url`, and `properties`.
- */
+/** A Notion database-query response, in the public `list` of `page` objects shape. */
 const QUERY_RESPONSE: NormalizedResponse = {
   status: 200,
   headers: {},

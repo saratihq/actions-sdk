@@ -2,7 +2,7 @@ import { defineAction } from '../../core/action';
 import { shortText } from '../../core/props';
 import { listSheetTabs, SHEETS_API_BASE, type SheetTab, sheetsAuth, spreadsheetIdProp } from './common';
 
-/** Public action type ids — no underscore catalog id exists (the established ones are hyphenated), so new ids. */
+/** Public action type ids — stable public catalog ids. */
 export const LIST_SHEETS_TYPE = 'sheets.list_sheets';
 export const CREATE_SPREADSHEET_TYPE = 'sheets.create_spreadsheet';
 
@@ -36,11 +36,7 @@ export const createSpreadsheet = defineAction({
   },
 });
 
-/**
- * List the worksheet tabs (name + id + index) of a spreadsheet. Read-only, and a
- * benign live-smoke action for Sheets — it also tells a caller which tab names to
- * put in a `range`.
- */
+/** List the worksheet tabs (name + id + index) of a spreadsheet — the tab names usable in a `range`. */
 export const listSheets = defineAction({
   type: LIST_SHEETS_TYPE,
   name: 'List sheets',

@@ -2,11 +2,7 @@ import type { ApiKeyScheme, AuthHandle } from '../../core/auth';
 import type { HttpClient } from '../../core/http/client';
 import type { DropdownOption } from '../../core/props';
 
-/**
- * Shared Intercom building blocks: the REST endpoints, Bearer auth, the
- * `Intercom-Version` header, and the `{ data, pages, total_count }` list envelope
- * are Intercom's public API contract. JSON throughout, so writes work.
- */
+/** Shared Intercom building blocks: REST base, Bearer auth, version header, list envelope. */
 
 export const INTERCOM_API_BASE = 'https://api.intercom.io';
 

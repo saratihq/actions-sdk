@@ -9,21 +9,7 @@ export const NEW_INVITEE_TYPE = 'calendly.new_invitee';
 /** The Calendly event this trigger subscribes to. */
 const EVENT = 'invitee.created';
 
-/**
- * A REGISTERED webhook trigger for new Calendly bookings. Per Calendly's API v2:
- *  - register: `POST /webhook_subscriptions` with
- *    `{ url, events: ['invitee.created'], organization, user, scope: 'user', signing_key }`
- *    (https://developer.calendly.com/api-docs/b3A6NTkxNDI1-create-webhook-subscription);
- *  - deliveries are signed `Calendly-Webhook-Signature: t=…,v1=…` — HMAC-SHA256
- *    hex of `${t}.${rawBody}` under the `signing_key`
- *    (https://developer.calendly.com/api-docs/4c305798a61d3-webhook-signatures);
- *  - the body is `{ event: 'invitee.created', created_at, payload: {…invitee…} }`
- *    where the invitee fields sit DIRECTLY on `payload` (with a nested
- *    `scheduled_event`).
- *
- * The SDK supplies the `signing_key`. The subscription is scoped to the
- * connected user, resolved from `/users/me` (its `uri` + `current_organization`).
- */
+/** A registered webhook trigger for new Calendly bookings, scoped to the connected user. */
 
 /** The invitee resource Calendly puts directly on the webhook `payload` (fields we read). */
 interface CalendlyInviteePayload {
@@ -96,10 +82,7 @@ export const newInvitee = defineTrigger({
     questionsAndAnswers: [{ question: 'What would you like to discuss?', answer: 'Onboarding' }],
     createdAt: '2026-07-20T17:51:19.000000Z',
   },
-  /**
-   * Register a user-scoped webhook subscription for `invitee.created`, pointed at
-   * the intake URL and signed with `secret`. Resolves the connected user + org itself.
-   */
+  /** Register a user-scoped `invitee.created` subscription signed with `secret`. */
   async onEnable({ http, auth, webhookUrl, secret }): Promise<WebhookRegistration> {
     const user = await getCurrentUser(http, auth);
     const res = await http.post<{ resource: { uri: string } }>(`${CALENDLY_API_BASE}/webhook_subscriptions`, {

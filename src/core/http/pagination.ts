@@ -3,11 +3,7 @@ import { ActionError } from '../errors';
 import { HttpClient, type HttpResponse } from './client';
 import { appendQuery, type QueryValue } from './types';
 
-/**
- * Given the page just fetched and the URL it was fetched from, return the next
- * page's absolute URL, or null to stop. Two provider styles are covered by the
- * builders below; anything exotic can supply its own function.
- */
+/** Given the page just fetched and its URL, return the next page's absolute URL, or null to stop. */
 export type NextPageFn = (response: HttpResponse, currentUrl: string) => string | null;
 
 export interface PaginateOptions<TItem> {
@@ -29,12 +25,7 @@ export interface PaginateOptions<TItem> {
 
 const DEFAULT_MAX_PAGES = 50;
 
-/**
- * Follow a provider's pagination to completion, collecting items across pages.
- * Transport-agnostic (it drives the {@link HttpClient}, so it works over the
- * direct and managed transports alike) and generic over the item type — the SDK's
- * one pagination path for every "list" action.
- */
+/** Follow a provider's pagination to completion, collecting items across pages — the SDK's one pagination path. */
 export async function paginate<TItem>(options: PaginateOptions<TItem>): Promise<TItem[]> {
   const maxPages = options.maxPages ?? DEFAULT_MAX_PAGES;
   let url = appendQuery(options.url, options.query);
@@ -63,12 +54,7 @@ export async function paginate<TItem>(options: PaginateOptions<TItem>): Promise<
   }
 }
 
-/**
- * Cursor-in-body pagination (Slack `conversations.list`: the next cursor lives
- * at `response_metadata.next_cursor`, empty when done). The cursor is written
- * back onto the SAME URL's query, replacing any prior cursor and preserving the
- * other params.
- */
+/** Cursor-in-body pagination: the cursor is written back onto the same URL's query, preserving other params. */
 export function cursorInBody(config: { cursorPath: string[]; cursorParam: string }): NextPageFn {
   return (response, currentUrl) => {
     const cursor = readPath(response.data, config.cursorPath);
@@ -77,11 +63,7 @@ export function cursorInBody(config: { cursorPath: string[]; cursorParam: string
   };
 }
 
-/**
- * Link-header pagination (GitHub: `Link: <…page=2>; rel="next"`). Returns the
- * `rel="next"` URL verbatim — the provider hands back a fully-formed next URL,
- * cursor/page state and all.
- */
+/** RFC 5988 Link-header pagination; returns the `rel="next"` URL verbatim. */
 export function linkHeader(rel = 'next'): NextPageFn {
   return (response) => {
     const link = response.headers['link'];

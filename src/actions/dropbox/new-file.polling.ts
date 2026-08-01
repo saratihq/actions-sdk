@@ -5,19 +5,8 @@ import { checkbox, shortText } from '../../core/props';
 import { DROPBOX_API_BASE, type DropboxEntry, type DropboxListFolderResult, dropboxAuth } from './common';
 
 /**
- * Polling trigger (`dropbox.new_file`) — fires for each file added under a
- * Dropbox folder after the trigger is enabled.
- *
- * STRATEGY CHOICE: Dropbox webhooks are configured at the APP level in the
- * app console — a single app-wide notification URL — and the notification body
- * carries only a list of account ids that changed, never the files, so there is
- * nothing to register per connection and the payload can't be transformed
- * directly. Polling is the correct strategy, and Dropbox's delta cursor makes it
- * exact: `/files/list_folder/get_latest_cursor` baselines the current state (no
- * history backfill), then `/files/list_folder/continue` returns exactly what
- * changed since. The SDK dedupes by `id:rev` so a provider re-delivery of the
- * same revision never double-fires.
- * Docs: https://www.dropbox.com/developers/documentation/http/documentation#files-list_folder-continue
+ * Fires for each file added under a folder after the trigger is enabled. Polling, not webhooks: Dropbox
+ * webhooks are app-level and carry only changed account ids, so there is nothing to register per connection.
  */
 export const DROPBOX_NEW_FILE_TYPE = 'dropbox.new_file';
 
@@ -114,8 +103,7 @@ export const newFile = defineTrigger({
     const path = props.path ?? '';
 
     const stored = await store.get<string>(CURSOR_KEY);
-    // First activation: baseline the current state via get_latest_cursor — no
-    // history backfill, so only files added *after* enabling ever fire.
+    // First activation baselines via get_latest_cursor, so only files added after enabling ever fire.
     if (!stored) {
       const res = await http.post<LatestCursorResult>(
         `${DROPBOX_API_BASE}/files/list_folder/get_latest_cursor`,
@@ -129,7 +117,6 @@ export const newFile = defineTrigger({
     await store.set(CURSOR_KEY, cursor);
     return entries.filter((entry) => entry['.tag'] === 'file').map(toEvent);
   },
-  // A new upload of the same path gets a new `rev`; keying on id:rev lets a
-  // genuine new revision fire while a provider re-delivery of the same one does not.
+  // Keying on id:rev fires a genuine new revision while suppressing a re-delivery of the same one.
   dedupeKey: (event): string => `${event.id}:${event.rev ?? ''}`,
 });

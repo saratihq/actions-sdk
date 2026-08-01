@@ -41,6 +41,9 @@ Triggers follow the same shape with `defineTrigger`. See
 - Let the HTTP client normalize errors — don't invent per-action error shapes.
 - Action `run` code must not read the raw credential; use the injected `http` client + `auth` handle.
 - Formatting is enforced by Prettier (`pnpm format`); keep diffs minimal.
+- **Comments: default to none.** Write one only where the code cannot say it itself, and then it is
+  one line — no rationale essays, no history, no restating the code. JSDoc is the exception: exported
+  symbols and type fields get one line each, because consumers read it in their editor.
 
 ## Commits & releases
 

@@ -3,12 +3,6 @@ import type { NormalizedRequest, NormalizedResponse } from '../../core/http/type
 import { FakeTransport, stubAuth } from '../../testing/fakes';
 import { getBalance, getCustomer, listCustomers, searchCustomers } from './reads';
 
-/**
- * Offline tests for the Stripe read actions. A {@link FakeTransport} replays a
- * canned Stripe response and records the request, asserting the URL + query
- * shaping and the response shaping (and the live customer picker) without a
- * connection. Writes are deferred pending form-body encoding.
- */
 function fake(handler: (req: NormalizedRequest) => NormalizedResponse) {
   const transport = new FakeTransport(handler);
   return { auth: stubAuth(transport, 'apiKey'), http: new HttpClient(), transport };

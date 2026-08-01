@@ -49,10 +49,7 @@ export const getCurrentUserAction = defineAction({
   },
 });
 
-/**
- * List the connected user's event types (bookable meetings). Resolves the user
- * URI itself, so no id input is needed.
- */
+/** List the connected user's event types; resolves the user URI itself, so no id input is needed. */
 export const listEventTypes = defineAction({
   type: LIST_EVENT_TYPES_TYPE,
   name: 'List event types',

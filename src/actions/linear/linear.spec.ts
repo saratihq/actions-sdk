@@ -6,12 +6,7 @@ import { createComment } from './comments';
 import { createIssue, getIssue, listIssues } from './issues';
 import { listTeams } from './teams';
 
-/**
- * Offline tests for the Linear GraphQL actions. A {@link FakeTransport} replays a
- * canned GraphQL envelope and records the operation the action posted, asserting
- * the query variables and the response shaping — including the "errors at HTTP
- * 200" path — without a live connection.
- */
+/** Offline harness for the Linear GraphQL actions, including the "errors at HTTP 200" path. */
 function fake(handler: (req: NormalizedRequest) => NormalizedResponse) {
   const transport = new FakeTransport(handler);
   return { auth: stubAuth(transport, 'apiKey'), http: new HttpClient(), transport };

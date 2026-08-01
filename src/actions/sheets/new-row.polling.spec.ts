@@ -35,8 +35,7 @@ describe('sheets.new_row polling trigger', () => {
     const { events } = await pollGrid(store, [HEADER, ADA]);
 
     expect(events).toEqual([]);
-    // A content-hash baseline is persisted (not a positional row count), so later
-    // rows are judged new by their data, and existing rows never fire.
+    // A content-hash baseline is persisted, not a positional row count.
     const hashes = store.snapshot().seenRowHashes as string[];
     expect(hashes).toHaveLength(1);
     expect(typeof hashes[0]).toBe('string');
@@ -77,8 +76,7 @@ describe('sheets.new_row polling trigger', () => {
     const store = new MemoryStore();
     await pollGrid(store, [HEADER, ADA]); // baseline: {ADA}
     await pollGrid(store, [HEADER, ADA, ALAN]); // ALAN fires, now at row 3
-    // Delete ALAN, add GRACE — GRACE lands at row 3, the SAME position ALAN held.
-    // Positional keying (String(rowNumber)="3") would suppress it; content keying fires it.
+    // GRACE lands at row 3, the position ALAN held: positional keying would suppress it.
     const { events } = await pollGrid(store, [HEADER, ADA, GRACE]);
 
     expect(events).toEqual<SheetRowEvent[]>([
@@ -93,9 +91,7 @@ describe('sheets.new_row polling trigger', () => {
   it('THE DEFECT: a mid-sheet insert fires only the inserted row, not the shifted trailing rows', async () => {
     const store = new MemoryStore();
     await pollGrid(store, [HEADER, ADA, ALAN]); // baseline: {ADA, ALAN}
-    // Insert GRACE between ADA and ALAN: ADA row 2, GRACE row 3, ALAN shifts to row 4.
-    // Positional keying would emit the trailing row 4 (ALAN, unchanged); content
-    // keying emits only GRACE, the row that is actually new.
+    // Inserting GRACE shifts ALAN to row 4: positional keying would re-emit ALAN.
     const { events } = await pollGrid(store, [HEADER, ADA, GRACE, ALAN]);
 
     expect(events).toEqual<SheetRowEvent[]>([

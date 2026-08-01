@@ -2,19 +2,11 @@ import type { ApiKeyScheme, AuthHandle } from '../../core/auth';
 import type { HttpClient } from '../../core/http/client';
 import type { DropdownOption } from '../../core/props';
 
-/**
- * Shared HubSpot (CRM v3) building blocks: the `/crm/v3` endpoints, Bearer auth,
- * the `{ properties }` object model, and the `{ results, paging }` envelope are
- * HubSpot's public contract. JSON throughout, so writes work.
- */
+/** Shared HubSpot (CRM v3) building blocks: `/crm/v3`, the `{ properties }` model, `{ results, paging }`. */
 
 export const HUBSPOT_API_BASE = 'https://api.hubapi.com';
 
-/**
- * HubSpot authenticates with an OAuth access token or a private-app token, both
- * as a Bearer credential. Declared as an `apiKey` header scheme so BYO paste and
- * managed OAuth run identical action code.
- */
+/** OAuth or private-app token, both as a Bearer header — one `apiKey` scheme so BYO and managed share code. */
 export const hubspotAuth: ApiKeyScheme = {
   type: 'apiKey',
   in: 'header',
@@ -55,7 +47,7 @@ export async function listHubspotOwners(http: HttpClient, auth: AuthHandle): Pro
   return res.data.results;
 }
 
-/** Live owner picker — independent of any other prop, so it works under today's loader contract. */
+/** Live owner picker — must stay independent of other props, per the loader contract. */
 export async function ownerOptions(http: HttpClient, auth: AuthHandle): Promise<DropdownOption<string>[]> {
   const owners = await listHubspotOwners(http, auth);
   return owners.map((owner) => {
@@ -72,7 +64,7 @@ export async function listDealPipelines(http: HttpClient, auth: AuthHandle): Pro
   return res.data.results;
 }
 
-/** Live deal-pipeline picker — independent of any other prop, so it works under today's loader contract. */
+/** Live deal-pipeline picker — must stay independent of other props, per the loader contract. */
 export async function pipelineOptions(http: HttpClient, auth: AuthHandle): Promise<DropdownOption<string>[]> {
   const pipelines = await listDealPipelines(http, auth);
   return pipelines.map((pipeline) => ({ label: pipeline.label, value: pipeline.id }));

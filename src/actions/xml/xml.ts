@@ -5,13 +5,6 @@ import { ActionError } from '../../core/errors';
 import type { JsonValue } from '../../core/http/types';
 import { checkbox, json, longText, shortText } from '../../core/props';
 
-/**
- * XML utilities — no-auth (`none` scheme) actions. The JSON→XML serialiser
- * is dependency-free; `convert_xml_to_json` uses `fast-xml-parser` (MIT) for a
- * correct parse (CDATA, namespaces, entities, comments). Action names are
- * snake_case for the SDK namespace (which forbids hyphens).
- */
-
 function escapeXml(text: string): string {
   return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }

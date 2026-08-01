@@ -7,11 +7,7 @@ import { ASANA_API_BASE, type AsanaResource, asanaAuth, resolveWorkspaceGid, wor
 /** Public type — a stable public catalog id. */
 export const LIST_PROJECTS_TYPE = 'asana.list_projects';
 
-/**
- * List projects, optionally scoped to a workspace (live picker), following
- * Asana's `next_page.offset` cursor up to `limit`. The workspace filter is
- * independent of other props, so its picker is live.
- */
+/** List projects, optionally workspace-scoped, following Asana's `next_page.offset` cursor up to `limit`. */
 export const listProjects = defineAction({
   type: LIST_PROJECTS_TYPE,
   name: 'List projects',
@@ -22,8 +18,7 @@ export const listProjects = defineAction({
     limit: number({ label: 'Max results', required: false, defaultValue: 100 }),
   },
   async run({ auth, props, http }): Promise<{ projects: AsanaResource[]; count: number }> {
-    // Asana's /projects rejects a call with no workspace/team scope (400), so
-    // resolve the caller's workspace or default to the first one.
+    // Asana's /projects 400s without a workspace/team scope.
     const workspace = await resolveWorkspaceGid(http, auth, props.workspace);
     if (!workspace) return { projects: [], count: 0 };
     const query: Record<string, QueryValue> = {

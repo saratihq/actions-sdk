@@ -3,17 +3,6 @@ import { isIP } from 'node:net';
 
 import { ActionError } from '../errors';
 
-/**
- * SSRF guard for user-controlled outbound URLs (e.g. `http.send_request`). Blocks
- * requests whose target resolves to a private / loopback / link-local / cloud-metadata
- * address, so a workflow can't be tricked into reaching internal services or
- * `169.254.169.254`. Public destinations are unaffected. A self-host operator can
- * opt specific hosts back in via `ORCHESTR_HTTP_ALLOWED_HOSTS`.
- *
- * Scope: this validates the INITIAL target only. HTTP-redirect targets and DNS
- * rebinding are not re-validated here (documented follow-up: connection-level pinning).
- */
-
 /** IPv4 dotted-quad → 32-bit unsigned int, or null when not a v4 literal. */
 function ipv4ToInt(ip: string): number | null {
   const m = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(ip);
@@ -75,11 +64,7 @@ export function ssrfAllowedHostsFromEnv(): string[] {
     .filter(Boolean);
 }
 
-/**
- * Reject `rawUrl` if it is not http(s), or if its host resolves to a blocked
- * address. EVERY address the hostname resolves to is checked (a public name that
- * points at an internal IP is still blocked). A host in `allowedHosts` bypasses.
- */
+/** Reject `rawUrl` unless http(s) and EVERY address its host resolves to is public; `allowedHosts` bypasses. */
 export async function assertPublicUrl(rawUrl: string, opts: { allowedHosts?: string[] } = {}): Promise<void> {
   let url: URL;
   try {
@@ -104,9 +89,7 @@ export async function assertPublicUrl(rawUrl: string, opts: { allowedHosts?: str
     try {
       addresses = (await lookup(host, { all: true })).map((a) => a.address);
     } catch {
-      // A host that does not resolve is not an SSRF vector — no internal service
-      // can be reached through a name that has no address. Let the request proceed;
-      // the transport surfaces the real DNS/connection error on its own.
+      // A name with no address reaches no internal service; let the transport surface the DNS error.
       return;
     }
   }
@@ -121,15 +104,7 @@ export async function assertPublicUrl(rawUrl: string, opts: { allowedHosts?: str
   }
 }
 
-/**
- * The one guard every fully user-controlled outbound URL goes through — the no-auth
- * `http.send_request`/`graphql.send_request` actions and the `http`/`rss` polling
- * triggers. It fixes the guard options in a single place (env host allowlist opt-in)
- * so a new user-URL boundary can't drift from the others or forget to pass them.
- * Residuals are exactly `assertPublicUrl`'s: an unresolvable host passes (a name with
- * no address reaches no internal service) and redirect targets / DNS rebinding are
- * not re-validated (connection-level pinning is the documented follow-up).
- */
+/** The one guard every fully user-controlled outbound URL must go through — validates the INITIAL target only (redirects and DNS rebinding are not re-checked). */
 export async function guardUserUrl(url: string): Promise<void> {
   await assertPublicUrl(url, { allowedHosts: ssrfAllowedHostsFromEnv() });
 }

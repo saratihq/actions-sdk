@@ -38,18 +38,10 @@ export interface JiraSearchResult {
   count: number;
 }
 
-/**
- * Default fields to request from `/search/jql`. The endpoint requires an explicit
- * `fields` param (unlike the retired `/search`, which defaulted to all navigable
- * fields), so the SDK asks for a workflow-useful core; callers override via the
- * `fields` prop.
- */
+/** `/search/jql` requires an explicit `fields` param; this is the default the `fields` prop overrides. */
 const DEFAULT_SEARCH_FIELDS = ['summary', 'status', 'assignee', 'created'];
 
-/**
- * Advance `/search/jql`: the next-page cursor lives at `nextPageToken` in the body
- * and rides back as `?nextPageToken=` on the same URL (absent → last page → stop).
- */
+/** `/search/jql` token pagination: `nextPageToken` in the body rides back as a query param. */
 const searchNextPage = cursorInBody({ cursorPath: ['nextPageToken'], cursorParam: 'nextPageToken' });
 
 /** Assemble the `fields` object shared by create and update from the common typed props. */
@@ -79,12 +71,7 @@ function buildFields(input: {
   return fields;
 }
 
-/**
- * Create an issue in a project. The core write verb. `project` and `issueType`
- * accept either an id or the human key/name; rich-text `description` is supplied
- * as plain text and shaped into ADF for you. `additionalFields` is the escape
- * hatch for labels/custom fields (raw Jira `fields` JSON).
- */
+/** Create an issue; `project`/`issueType` take an id or a key/name, and `description` is shaped into ADF. */
 export const createIssue = defineAction({
   type: CREATE_ISSUE_TYPE,
   name: 'Create issue',
@@ -174,10 +161,7 @@ export const getIssue = defineAction({
   },
 });
 
-/**
- * Update fields on an existing issue. Every field is optional; only the ones you
- * supply are changed. `returnIssue=true` echoes the updated issue back.
- */
+/** Update an existing issue — only the fields you supply are changed. */
 export const updateIssue = defineAction({
   type: UPDATE_ISSUE_TYPE,
   name: 'Update issue',
@@ -216,13 +200,7 @@ export const updateIssue = defineAction({
   },
 });
 
-/**
- * Search issues with JQL via `GET /search/jql` (the retired `/search` now 410s).
- * `/search/jql` uses token pagination — the response carries `{ issues,
- * nextPageToken? }` — so the SDK walks `nextPageToken` to completion, capped at
- * `maxResults` issues. The `jql` is passed through verbatim: `/search/jql` rejects
- * an UNBOUNDED query with 400, so bounding it is the caller's responsibility.
- */
+/** Search issues via `GET /search/jql`, walking `nextPageToken` up to `maxResults`; an unbounded JQL 400s. */
 export const searchIssues = defineAction({
   type: SEARCH_ISSUES_TYPE,
   name: 'Search issues',

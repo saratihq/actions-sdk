@@ -1,19 +1,6 @@
 import type { OAuth2Scheme } from '../../core/auth';
 import { shortText } from '../../core/props';
 
-/**
- * Shared Salesforce building blocks: the REST data API
- * (`/services/data/v{ver}/…`), OAuth2 Bearer auth, and the SOQL/`sobjects`
- * shapes are Salesforce's public contract. JSON throughout, so writes work.
- *
- * Salesforce is **instance-scoped**: every call is rooted at the org's own
- * `instance_url`. On a managed connection that comes from account metadata; here,
- * on the direct transport, it rides as a required `instanceUrl` prop (it is config,
- * not a secret, and the opaque auth handle can't carry it). An `sobject` picker
- * therefore needs that prop value — blocked until the loader contract can pass
- * set-prop values.
- */
-
 /** Salesforce authenticates with an OAuth2 bearer access token, attached by the transport. */
 export const salesforceAuth: OAuth2Scheme = { type: 'oauth2' };
 

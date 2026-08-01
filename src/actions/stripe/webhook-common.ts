@@ -5,31 +5,13 @@ import type { HttpClient } from '../../core/http/client';
 import type { WebhookRegistration, WebhookRequest } from '../../core/trigger';
 import { STRIPE_API_BASE } from './common';
 
-/**
- * Shared plumbing for Stripe's REGISTERED-webhook triggers (`payment_succeeded`,
- * `new_customer`, …). Every one registers the SAME webhook-endpoint shape — only
- * the subscribed event and the payload transform differ — so the create/delete
- * API calls, the signature check, and the event envelope live here, authored once.
- *
- * Per Stripe's public webhook contract: `POST /v1/webhook_endpoints`
- * (form-encoded, `enabled_events[]`), the `secret` (`whsec_…`) it returns, and
- * the `Stripe-Signature: t=…,v1=…` HMAC-SHA256 scheme.
- * Docs: https://docs.stripe.com/api/webhook_endpoints/create and
- * https://docs.stripe.com/webhooks.md#verify-manually.
- */
-
 /** The `POST /v1/webhook_endpoints` response — the id (to delete) and the signing secret. */
 interface StripeWebhookEndpoint {
   id: string;
   secret?: string;
 }
 
-/**
- * The Stripe Event envelope every webhook delivery carries. `data.object` is the
- * resource that changed (a charge, a customer, …); generic over it so each
- * trigger narrows to its own resource shape.
- * Docs: https://docs.stripe.com/api/events/object.
- */
+/** The Stripe Event envelope every webhook delivery carries; `data.object` is the resource that changed. */
 export interface StripeEvent<T> {
   id: string;
   object: 'event';
@@ -49,15 +31,8 @@ export function asStripeEvent<T>(body: unknown, expectedType: string): StripeEve
 }
 
 /**
- * Register a Stripe webhook endpoint subscribed to `event`, pointed at the public
- * intake URL. Stripe GENERATES the signing secret and returns it only on creation
- * — so it is captured into the {@link WebhookRegistration} handle as
- * `signingSecret`; the runtime persists it verbatim and surfaces it back to
- * {@link verifyStripeSignature} (via the `verify` secrets bag as `signingSecret`)
- * on every inbound delivery.
- *
- * The body is `application/x-www-form-urlencoded` — Stripe's REST API takes no
- * JSON — so it uses the direct transport's `form` encoder (`enabled_events[0]=…`).
+ * Register a Stripe webhook endpoint for `event`; Stripe returns the signing secret only here,
+ * so it must be captured into the {@link WebhookRegistration} for {@link verifyStripeSignature}.
  */
 export async function createStripeWebhookEndpoint(
   http: HttpClient,
@@ -89,15 +64,8 @@ export async function deleteStripeWebhookEndpoint(
 }
 
 /**
- * Authenticate an inbound delivery with the endpoint's signing secret before
- * trusting the payload. Stripe signs `${t}.${rawBody}` (the `t=` timestamp from
- * the header, a literal dot, then the exact received bytes) with HMAC-SHA256 and
- * sends the hex digest as the `v1` scheme in `Stripe-Signature: t=…,v1=…`.
- * Comparison is timing-safe. Returns false (never throws) for any missing/malformed
- * input — a spoofed or unsigned request must fail closed.
- *
- * Replay is neutralised by the per-event dedupe (`evt_…`), not a timestamp window,
- * so no clock-skew rejection is enforced here.
+ * Verify a `Stripe-Signature: t=…,v1=…` delivery (timing-safe); fails closed rather than throwing.
+ * Replay is neutralised by the per-event dedupe, not a timestamp window.
  */
 export function verifyStripeSignature(request: WebhookRequest, secrets: Record<string, string>): boolean {
   const secret = secrets.signingSecret;

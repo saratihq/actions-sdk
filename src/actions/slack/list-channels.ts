@@ -26,12 +26,7 @@ const DEFAULT_MAX_CHANNELS = 1000;
 /** Slack caps `conversations.list` at 1000/page; 200 keeps each page light while proving multi-page. */
 const PAGE_SIZE = 200;
 
-/**
- * Fetch all channels via `conversations.list`, following Slack's cursor
- * pagination (`response_metadata.next_cursor`) to completion. Shared by the
- * list action and by the channel picker in `send_channel_message` — one
- * paginated read, two consumers.
- */
+/** Fetch all channels via `conversations.list`, following Slack's cursor pagination to completion. */
 export async function listSlackChannels(
   http: HttpClient,
   auth: AuthHandle,
@@ -48,10 +43,7 @@ export async function listSlackChannels(
   });
 }
 
-/**
- * A paginated REST read — exercises the cursor pagination helper against a live
- * API returning real workspace channels.
- */
+/** List the workspace's channels (a paginated read). */
 export const listChannels = defineAction({
   type: LIST_CHANNELS_TYPE,
   name: 'List channels',

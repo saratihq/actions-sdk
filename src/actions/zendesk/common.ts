@@ -2,21 +2,7 @@ import type { BasicScheme } from '../../core/auth';
 import type { NextPageFn } from '../../core/http/pagination';
 import { shortText } from '../../core/props';
 
-/**
- * Shared Zendesk (Support API) building blocks: the `/api/v2` endpoints, the
- * `{ ticket }` / `{ tickets, next_page }` envelopes, and the subdomain-scoped host
- * are Zendesk's public contract. JSON throughout, so writes work.
- *
- * Zendesk is **subdomain-scoped** (`https://<subdomain>.zendesk.com`). The opaque
- * auth handle can't carry that, so it rides as a required `subdomain` prop — which
- * blocks assignee/group pickers until the loader contract can pass set-prop values.
- */
-
-/**
- * BYO Zendesk authenticates with HTTP Basic: username `{email}/token`, password
- * the API token. Managed OAuth attaches a Bearer token server-side instead.
- * Declared `basic` for the direct transport; the managed transport attaches its own.
- */
+/** Declared `basic` for the direct transport (username `{email}/token`); the managed transport attaches its own bearer. */
 export const zendeskAuth: BasicScheme = { type: 'basic' };
 
 /** Root a Support API call at the account's subdomain. */

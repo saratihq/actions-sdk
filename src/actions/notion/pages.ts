@@ -8,11 +8,7 @@ export const CREATE_PAGE_TYPE = 'notion.create_page';
 export const GET_PAGE_TYPE = 'notion.get_page';
 export const UPDATE_PAGE_TYPE = 'notion.update_page';
 
-/**
- * Create a page as a row in a database. The **database picker is live**;
- * `properties` is raw Notion JSON keyed by the database's own columns (whose
- * shape a picker can't yet resolve).
- */
+/** Create a page (database row); `properties` is raw Notion JSON keyed by the database's own columns. */
 export const createPage = defineAction({
   type: CREATE_PAGE_TYPE,
   name: 'Create page',

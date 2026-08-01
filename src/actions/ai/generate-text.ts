@@ -4,17 +4,9 @@ import { ActionError } from '../../core/errors';
 import type { JsonValue } from '../../core/http/types';
 import { checkbox, dropdown, longText, number } from '../../core/props';
 
-/**
- * The "generate text" family: one prompt-in / text-out action per LLM provider,
- * all built from a SINGLE {@link makeGenerateText} factory. Every provider ships
- * the identical config surface (prompt, system, model, temperature, max tokens,
- * JSON output); the factory owns the shared shape and the response boundary, and
- * each provider supplies only what its REST API differs on — the auth scheme, the
- * model list, the request body, and the text/usage extraction. No vendor SDK is
- * imported; each provider is called over its REST API directly.
- */
+/** The "generate text" family: one prompt-in / text-out action per LLM provider, from a single factory. */
 
-/** The uniform output every provider returns. `usage` passes through the raw provider block when present. */
+/** The uniform output every provider returns. */
 export interface GenerateTextOutput {
   text: string;
   model: string;
@@ -27,7 +19,7 @@ export interface GenerateInput {
   system?: string;
   model: string;
   temperature?: number;
-  /** Always resolved (defaults to 1024) so a provider never has to re-apply the default. */
+  /** Always resolved (defaults to 1024). */
   maxTokens: number;
   /** Always resolved (defaults to false). */
   jsonOutput: boolean;
@@ -56,11 +48,7 @@ export interface ProviderConfig {
   extractUsage(data: unknown): unknown;
 }
 
-/**
- * Build one provider's `generate_text` action. The public `type` is always
- * `<slug>.generate_text`; the props are byte-identical across providers so the
- * client renders one consistent form regardless of vendor.
- */
+/** Build one provider's `<slug>.generate_text` action; props are identical across providers. */
 export function makeGenerateText(config: ProviderConfig) {
   return defineAction({
     type: `${config.slug}.generate_text`,
@@ -110,8 +98,6 @@ export function makeGenerateText(config: ProviderConfig) {
       };
       const res = await http.post<unknown>(config.buildUrl(input), {
         auth,
-        // POST is non-idempotent — the client won't retry it on an ambiguous 5xx,
-        // so a transient failure never risks a duplicate (billed) generation.
         ...(config.extraHeaders ? { headers: config.extraHeaders } : {}),
         body: config.buildBody(input),
       });
@@ -122,7 +108,7 @@ export function makeGenerateText(config: ProviderConfig) {
   });
 }
 
-// ─── response-boundary helpers (shared; narrow `unknown`, never trust the shape) ───
+// ─── response-boundary helpers ───
 
 /** Narrow to a plain object (arrays excluded), else undefined. */
 export function asRecord(value: unknown): Record<string, unknown> | undefined {
@@ -136,7 +122,7 @@ export function asArray(value: unknown): unknown[] | undefined {
   return Array.isArray(value) ? (value as unknown[]) : undefined;
 }
 
-/** The one failure raised when a provider response lacks the expected text path. */
+/** Raised when a provider response lacks the expected text path. */
 export function throwNoText(label: string): never {
   throw new ActionError({
     code: 'provider_error',
@@ -145,12 +131,12 @@ export function throwNoText(label: string): never {
   });
 }
 
-/** Read a top-level field off the (unknown) response — used for the usage/metadata block. */
+/** Read a top-level field off the (unknown) response. */
 export function usageField(data: unknown, key: string): unknown {
   return asRecord(data)?.[key];
 }
 
-// ─── OpenAI-shaped chat completions (shared by OpenAI + Mistral) ───
+// ─── OpenAI-shaped chat completions (OpenAI + Mistral) ───
 
 /** The `/chat/completions` request body OpenAI and Mistral both accept. */
 export function chatCompletionBody(input: GenerateInput): JsonValue {

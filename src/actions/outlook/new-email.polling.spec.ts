@@ -3,11 +3,7 @@ import { FakeTransport, stubAuth } from '../../testing/fakes';
 import { MemoryStore } from '../../testing/memory-store';
 import { newEmail } from './new-email.polling';
 
-/**
- * Real /me/messages response shape (Microsoft Graph v1.0) — the `{ value: [...] }`
- * envelope with a message carrying from/toRecipients/receivedDateTime, extending
- * the documented example.
- */
+/** A `/me/messages` message in Graph v1.0's `{ value: [...] }` envelope shape. */
 const MESSAGE_LATE_TASKS = {
   '@odata.etag': 'W/"CQAAABYAAADHcgC8Hl9tRZ/hc1wEUs1TAAAwR4Hg"',
   id: 'AAMkAGUAAAwTW09AAA=',
@@ -53,10 +49,9 @@ describe('outlook.new_email polling trigger', () => {
     const store = new MemoryStore();
     const { events } = await newEmail.runPoll({ auth: stubAuth(transport), props: {}, store });
 
-    // INV-2: activation must never backfill the existing inbox.
+    // Activation must never backfill the existing inbox.
     expect(events).toEqual([]);
     expect(transport.requests).toHaveLength(0);
-    // The SDK records the watermark so only later mail fires.
     expect(store.snapshot().lastPolledAt).toEqual(expect.any(String));
   });
 

@@ -4,10 +4,7 @@ import { type AirtableBase, airtableAuth, listAirtableBases } from './common';
 /** Public type — a stable public catalog id. */
 export const LIST_BASES_TYPE = 'airtable.list_bases';
 
-/**
- * List every base the token can access. Read-only and the benign live-smoke
- * action for Airtable — it also underpins the base picker on the record actions.
- */
+/** List every base the token can access; also underpins the base picker on the record actions. */
 export const listBases = defineAction({
   type: LIST_BASES_TYPE,
   name: 'List bases',

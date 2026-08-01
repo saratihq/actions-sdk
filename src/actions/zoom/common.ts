@@ -2,23 +2,9 @@ import type { AuthHandle, OAuth2Scheme } from '../../core/auth';
 import type { HttpClient } from '../../core/http/client';
 import { dropdown, type DropdownOption, type DropdownSchema } from '../../core/props';
 
-/**
- * Shared Zoom (API v2) building blocks: the `/users/{id}/meetings` and
- * `/meetings/{id}` endpoints, OAuth2 Bearer auth, the numeric meeting `type`
- * enum, and the `next_page_token` cursor are Zoom's public contract. JSON
- * throughout, so every action stays on the managed transport.
- */
-
 export const ZOOM_API_BASE = 'https://api.zoom.us/v2';
 
-/**
- * Zoom authenticates with an OAuth2 bearer access token, attached by the
- * transport. Declared with Zoom's 2024 GRANULAR scope names — the classic
- * `meeting:read` etc. are being retired, and a BYO own-client app can only
- * request the granular forms. `user:read:list_users:admin` backs the host picker
- * (account-level user listing); it degrades gracefully when the plan lacks it.
- * Scopes: https://developers.zoom.us/docs/integrations/oauth-scopes-granular/
- */
+/** OAuth2 bearer auth; scopes must stay in Zoom's GRANULAR form — a BYO own-client app cannot request the retiring classic names. */
 export const zoomAuth: OAuth2Scheme = {
   type: 'oauth2',
   scopes: ['meeting:read:meeting', 'meeting:write:meeting', 'user:read:user', 'user:read:list_users:admin'],
@@ -71,12 +57,7 @@ export async function listUsers(http: HttpClient, auth: AuthHandle): Promise<Zoo
   return res.data.users ?? [];
 }
 
-/**
- * Live host picker — independent of any other prop (it lists the account's
- * users). Requires an account-level scope (`user:read:list_users:admin`); on a
- * plan without it, Zoom 4xxs and the host runtime degrades the field to free text.
- * The meeting host id is the user's canonical `id`; leaving the field blank means "me".
- */
+/** Live host picker; needs `user:read:list_users:admin` — without it Zoom 4xxs and the host degrades the field to free text. */
 export async function userOptions(http: HttpClient, auth: AuthHandle): Promise<DropdownOption<string>[]> {
   const users = await listUsers(http, auth);
   return users.map((user) => {

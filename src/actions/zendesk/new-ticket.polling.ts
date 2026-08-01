@@ -2,26 +2,7 @@ import { defineTrigger } from '../../core/trigger';
 import type { QueryValue } from '../../core/http/types';
 import { subdomainProp, type ZendeskTicket, zendeskAuth, zendeskBaseUrl } from './common';
 
-/**
- * Polling trigger (`zendesk.new_ticket`) — fires when a ticket is created.
- *
- * STRATEGY — polling, not a registered webhook. Zendesk *can* create
- * per-account webhooks via API, but the signing secret is **provider-generated**
- * (returned at creation / fetched from `/webhooks/{id}/signing_secret`), not
- * settable to the runtime's own secret — so it does not fit the SDK's
- * runtime-owned-secret verify contract, and it additionally needs a paired
- * trigger object. The correct-by-construction choice is the cursor-based
- * incremental export, deduping by ticket id.
- *
- * Endpoint shape (GET `/api/v2/incremental/tickets/cursor.json`, `start_time`
- * Unix-epoch seed then an `after_cursor` pointer, `end_of_stream` terminator) is
- * Zendesk's public contract — see
- * https://developer.zendesk.com/api-reference/ticketing/ticket-management/incremental_exports/ .
- * The incremental stream returns tickets that were **created OR updated**, so this
- * trigger emits only tickets whose `created_at` is at/after the moment the
- * trigger started watching — updates to pre-existing tickets are filtered out,
- * and id-dedup ensures each new ticket fires exactly once.
- */
+/** Polling trigger (`zendesk.new_ticket`) — walks the incremental cursor export, emitting only tickets created at/after the moment watching began. */
 export const NEW_TICKET_TYPE = 'zendesk.new_ticket';
 
 /** Zendesk requires `start_time` to be more than one minute in the past; seed two minutes back to be safe. */
@@ -94,8 +75,7 @@ export const newTicket = defineTrigger({
 
     let query: Record<string, QueryValue>;
     if (cursor === undefined) {
-      // First poll: seed from a moment in the past (API rule) but only emit
-      // tickets created at/after *now*, so history isn't backfilled as "new".
+      // Seed in the past (API rule) but watermark at now, so history isn't backfilled.
       startedAt = Math.floor(Date.now() / 1000);
       await store.set('startedAt', startedAt);
       query = { start_time: startedAt - START_LOOKBACK_SEC };

@@ -4,10 +4,7 @@ import { type HubspotOwner, hubspotAuth, listHubspotOwners } from './common';
 /** Public type — a stable public catalog id. */
 export const LIST_OWNERS_TYPE = 'hubspot.list_owners';
 
-/**
- * List owners (CRM users). Read-only and the benign live-smoke action for
- * HubSpot — it also underpins the owner picker on `create_contact`.
- */
+/** List owners (CRM users); also underpins the owner picker on `create_contact`. */
 export const listOwners = defineAction({
   type: LIST_OWNERS_TYPE,
   name: 'List owners',

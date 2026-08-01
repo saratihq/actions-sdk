@@ -7,13 +7,7 @@ import { geminiGenerateText } from './gemini';
 import { mistralGenerateText } from './mistral';
 import { openaiGenerateText } from './openai';
 
-/**
- * Golden offline tests for the LLM `generate_text` family. A {@link FakeTransport}
- * replays a canned provider response and records every outbound request, so it
- * asserts — without a network — the URL, the provider-shaped body (model,
- * messages/contents, token cap, and the JSON-output toggle), the extra header
- * Claude requires, and that a stubbed response is extracted to `{ text, model }`.
- */
+/** Golden offline tests for the LLM `generate_text` family, driven by a {@link FakeTransport}. */
 function fake(handler: (req: NormalizedRequest, i: number) => NormalizedResponse) {
   const transport = new FakeTransport(handler);
   return { auth: stubAuth(transport, 'apiKey'), http: new HttpClient(), transport };
@@ -80,7 +74,6 @@ describe('openai.generate_text', () => {
     };
     expect(body.response_format).toEqual({ type: 'json_object' });
     expect(body.messages).toEqual([{ role: 'user', content: 'JSON please' }]);
-    // maxTokens defaults to 1024 when the prop is omitted.
     expect(body.max_tokens).toBe(1024);
   });
 
@@ -173,7 +166,6 @@ describe('claude.generate_text', () => {
     });
     const body = transport.requests[0]!.body as { system: string; max_tokens: number };
     expect(body.system).toBe('Base\n\nRespond with only valid JSON.');
-    // max_tokens is required by the Messages API — always present, defaulting to 1024.
     expect(body.max_tokens).toBe(1024);
   });
 

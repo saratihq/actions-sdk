@@ -4,13 +4,7 @@ import type { JsonValue } from '../../core/http/types';
 import { dateTime, dropdown, longText, number, shortText } from '../../core/props';
 import { userIdProp, ZOOM_API_BASE, type ZoomMeeting, type ZoomMeetingListEntry, zoomAuth } from './common';
 
-/**
- * Public types — aligned to the catalog ids where one exists so the host runtime's
- * dedup replaces the prior row with this one. `zoom_create_meeting`,
- * `zoom_find_meeting` (get by id), and `zoom_update_meeting` are already
- * underscore catalog ids → reused verbatim. `list_meetings` / `delete_meeting`
- * have no prior equivalent → new underscore ids.
- */
+/** Public types — stable public catalog ids. */
 export const CREATE_MEETING_TYPE = 'zoom.zoom_create_meeting';
 export const LIST_MEETINGS_TYPE = 'zoom.list_meetings';
 export const GET_MEETING_TYPE = 'zoom.zoom_find_meeting';
@@ -32,10 +26,7 @@ function meetingTypeProp() {
   });
 }
 
-/**
- * Create a meeting for a host (`userId`, or the connected user when blank).
- * `start_time`/`duration` apply to a scheduled meeting (`type` 2, the default).
- */
+/** Create a meeting for a host (blank `userId` = the connected user); `start_time`/`duration` apply to a scheduled meeting. */
 export const createMeeting = defineAction({
   type: CREATE_MEETING_TYPE,
   name: 'Create Zoom meeting',
@@ -74,11 +65,7 @@ export const createMeeting = defineAction({
   },
 });
 
-/**
- * List a host's meetings, following Zoom's `next_page_token` cursor up to `limit`.
- * `type` filters by lifecycle (scheduled/live/upcoming); the host defaults to the
- * connected user when `userId` is blank.
- */
+/** List a host's meetings, following Zoom's `next_page_token` cursor up to `limit`. */
 export const listMeetings = defineAction({
   type: LIST_MEETINGS_TYPE,
   name: 'List Zoom meetings',
@@ -138,11 +125,7 @@ export interface ZoomMeetingMutationResult {
   meetingId: string;
 }
 
-/**
- * Update a meeting. Only the supplied fields change (a PATCH); Zoom returns 204
- * No Content, so the result is a synthesised confirmation (fetch with
- * {@link getMeeting} to read the updated meeting back).
- */
+/** Update a meeting (PATCH, supplied fields only); Zoom returns 204 No Content, so the result is synthesised. */
 export const updateMeeting = defineAction({
   type: UPDATE_MEETING_TYPE,
   name: 'Update Zoom meeting',

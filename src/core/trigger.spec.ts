@@ -29,8 +29,7 @@ describe('polling trigger (slack.new_channel)', () => {
     const auth = stubAuth(transport);
     const store = new MemoryStore();
 
-    // First poll = baseline: the channels present at activation are recorded but
-    // emit ZERO events (activation must not fire the whole channel list).
+    // First poll = baseline: activation records the existing channels but must fire nothing.
     const first = await newChannel.runPoll({ auth, props: {}, store });
     expect(first.events).toEqual([]);
     expect(typeof first.polledAt).toBe('string');
@@ -52,10 +51,7 @@ describe('polling trigger (slack.new_channel)', () => {
   });
 
   it('dedupes against the full known-set even when the SDK LRU seen has evicted the id', async () => {
-    // A large workspace: the trigger recorded C1 in its OWN uncapped known-set, but
-    // the SDK's LRU `seen` has since evicted it. Re-listing C1 must NOT re-fire it —
-    // the regression the head-window + LRU-only approach caused above DEDUPE_CAP.
-    // The known-set is already primed (defined), so this is a post-baseline poll.
+    // C1 sits in the trigger's own uncapped known-set but has been evicted from the SDK's LRU `seen`.
     const store = new MemoryStore();
     await store.set('known_channel_ids', ['C1']);
     await store.set('seen', []);
@@ -72,9 +68,7 @@ describe('polling trigger (slack.new_channel)', () => {
       store,
     });
     const seeded = store.snapshot();
-    // Baseline poll: the existing channel is recorded in the trigger's OWN known-set
-    // (its watermark) and the SDK records lastPolledAt — but nothing fires, so the
-    // SDK's `seen` stays empty.
+    // Baseline poll: known-set + lastPolledAt are recorded, but nothing fires so `seen` stays empty.
     expect(seeded.known_channel_ids).toEqual(['C1']);
     expect(seeded.seen).toEqual([]);
     expect(typeof seeded.lastPolledAt).toBe('string');

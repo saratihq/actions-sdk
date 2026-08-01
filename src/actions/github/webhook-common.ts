@@ -3,14 +3,7 @@ import type { HttpClient } from '../../core/http/client';
 import type { WebhookRegistration, WebhookRequest } from '../../core/trigger';
 import { verifyGithubSignature } from './signature';
 
-/**
- * Shared plumbing for GitHub's REGISTERED-webhook triggers (`new_issue`,
- * `new_pull_request`, …). Every one registers the SAME repo-hook shape — only the
- * `events` array and the payload transform differ — so the create/delete API
- * calls and the signature check live here, authored once. (The reference
- * `new-push.webhook.ts` predates this helper and keeps its own inline copy; it is
- * a frozen reference and deliberately left untouched.)
- */
+/** Shared plumbing for GitHub's registered-webhook triggers: one repo-hook shape, only `events` differs. */
 
 export const GITHUB_API_BASE = 'https://api.github.com';
 export const GITHUB_HEADERS: Record<string, string> = {
@@ -25,11 +18,7 @@ interface GithubHook {
   id: number;
 }
 
-/**
- * Register a repo webhook for `events`, pointed at the configured public intake URL and
- * signed with the runtime's per-trigger secret. Returns the GitHub hook id as
- * the {@link WebhookRegistration} handle so `onDisable` can delete exactly it.
- */
+/** Register a repo webhook for `events`, returning the GitHub hook id so `onDisable` deletes exactly it. */
 export async function createRepoWebhook(
   http: HttpClient,
   auth: AuthHandle,
@@ -70,11 +59,7 @@ export async function deleteRepoWebhook(
   }
 }
 
-/**
- * Authenticate an inbound delivery with the per-trigger secret before trusting
- * the payload — the `X-Hub-Signature-256` HMAC every registered github webhook
- * relies on. Returns false (never throws) for any missing/malformed input.
- */
+/** Authenticate a delivery's `X-Hub-Signature-256` before trusting it; returns false, never throws. */
 export function verifyGithubDelivery(request: WebhookRequest, secrets: Record<string, string>): boolean {
   const secret = secrets.signingSecret;
   return secret ? verifyGithubSignature(request, secret) : false;

@@ -3,21 +3,9 @@ import type { HttpClient } from '../../core/http/client';
 import type { NextPageFn } from '../../core/http/pagination';
 import type { DropdownOption } from '../../core/props';
 
-/**
- * Shared Typeform building blocks: the `/forms` and `/forms/{id}/responses`
- * endpoints, OAuth2 Bearer auth, the `{ items, page_count, total_items }` list
- * envelope, and the `before`-token response cursor. JSON throughout.
- */
-
 export const TYPEFORM_API_BASE = 'https://api.typeform.com';
 
-/**
- * Typeform authenticates with a personal access token / OAuth token as a Bearer
- * credential. `webhooks:write`/`webhooks:read` are required so the `new_response`
- * trigger's `onEnable` (PUT /forms/{id}/webhooks/{tag}) can register over the
- * OAuth transport — without them Typeform 403s the webhook create.
- * Scopes: https://www.typeform.com/developers/get-started/scopes/
- */
+/** Bearer auth; the `webhooks:*` scopes are required or the `new_response` trigger's registration 403s. */
 export const typeformAuth: OAuth2Scheme = {
   type: 'oauth2',
   scopes: ['forms:read', 'responses:read', 'webhooks:write', 'webhooks:read'],
@@ -76,10 +64,7 @@ export function withQueryParam(url: string, key: string, value: string): string 
   return parsed.toString();
 }
 
-/**
- * Page-number pagination (Typeform /forms): read `page_count` from the body and
- * the current `page` from the URL; advance until the last page.
- */
+/** Page-number pagination (Typeform /forms): advance `page` until `page_count`. */
 export const pageNumberNext: NextPageFn = (response, currentUrl) => {
   const pageCount = (response.data as { page_count?: number }).page_count ?? 1;
   const current = Number(new URL(currentUrl).searchParams.get('page') ?? '1');
@@ -87,11 +72,7 @@ export const pageNumberNext: NextPageFn = (response, currentUrl) => {
   return withQueryParam(currentUrl, 'page', String(current + 1));
 };
 
-/**
- * `before`-token pagination (Typeform /responses): responses come newest-first;
- * pass the LAST item's `token` as `before` to fetch the next (older) page. Stops
- * on a short page (fewer than `pageSize` items) or a missing token.
- */
+/** `before`-token pagination (Typeform /responses): responses are newest-first, so the last item's `token` fetches the next older page. */
 export function beforeTokenNext(pageSize: number): NextPageFn {
   return (response, currentUrl) => {
     const items = (response.data as { items?: Array<{ token?: string }> }).items ?? [];
@@ -115,10 +96,7 @@ export async function listForms(
   return res.data.items ?? [];
 }
 
-/**
- * Live form picker — independent of any other prop (it lists the account's own
- * forms), so it works under today's loader contract and honours the `search` term.
- */
+/** Live form picker, honouring the loader's `search` term. */
 export async function formOptions(
   http: HttpClient,
   auth: AuthHandle,

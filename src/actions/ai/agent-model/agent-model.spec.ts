@@ -4,18 +4,7 @@ import { FakeTransport, stubAuth } from '../../../testing/fakes';
 import { callAgentModel } from './index';
 import type { AgentModelRequest } from './types';
 
-/**
- * Golden offline tests for the tool-aware agent model call. A {@link FakeTransport}
- * replays a REAL captured tool-call / text response from each provider's public
- * docs and records the outbound request, so it asserts — without a network — that:
- *   (1) a `tool_use`/`tool_calls`/`functionCall` response parses to `toolCalls[]`,
- *   (2) a text response parses to `{ text }`,
- *   (3) the request body carries the bound tools + the prior tool-result turn in
- *       that provider's EXACT multi-turn format, and
- *   (4) usage is normalized across each provider's differing field names.
- * The opaque-auth seam is exercised end-to-end: the call rides `http` via a stub
- * {@link stubAuth} handle, never touching a credential.
- */
+/** Golden offline tests for the tool-aware agent model call, replaying captured provider responses. */
 
 function run(response: unknown) {
   const transport = new FakeTransport(() => ({ status: 200, headers: {}, data: response }));
@@ -130,7 +119,6 @@ describe('callAgentModel — claude (Anthropic Messages tool use)', () => {
   });
 
   it('defaults max_tokens to an agent-sized 4096 when the request omits it', async () => {
-    // 1024 can truncate a large tool-call args block or a long final answer mid-output.
     const { invoke, transport } = run({ content: [{ type: 'text', text: 'ok' }] });
     const req: AgentModelRequest = { ...multiTurn('claude', 'claude-opus-4-8') };
     delete req.maxTokens;
@@ -319,8 +307,7 @@ describe('callAgentModel — gemini (generateContent function calling)', () => {
     const { invoke, transport } = run({
       candidates: [{ content: { parts: [{ text: 'ok' }] } }],
     });
-    // A buffer whose call id is the synthesized `name_index` — Gemini sent no id,
-    // so results thread by NAME only and no `id` rides the wire.
+    // Synthesized `name_index` call id — Gemini sent none, so no `id` rides the wire.
     const req: AgentModelRequest = {
       ...multiTurn('gemini', 'gemini-2.0-flash'),
       messages: [
@@ -367,8 +354,7 @@ describe('callAgentModel — gemini (generateContent function calling)', () => {
   });
 
   it('preserves a real functionCall id and threads it back on both echoed call + result', async () => {
-    // Two CONCURRENT calls to the SAME function — names collide, so only the id
-    // Gemini returns can map each result to its call. Capture it, don't synthesize.
+    // Two concurrent calls to the SAME function — only Gemini's own id can map each result to its call.
     const { invoke } = run({
       candidates: [
         {
@@ -388,8 +374,7 @@ describe('callAgentModel — gemini (generateContent function calling)', () => {
       { id: 'fc_nyc', name: 'get_weather', input: { location: 'NYC' } },
     ]);
 
-    // Now thread both distinct-id results back and assert the id rides both the
-    // model turn's functionCall AND the user turn's functionResponse.
+    // Thread both results back: the id must ride the functionCall AND the functionResponse.
     const { invoke: invoke2, transport } = run({ candidates: [{ content: { parts: [{ text: 'ok' }] } }] });
     const req: AgentModelRequest = {
       provider: 'gemini',

@@ -3,13 +3,7 @@ import { FakeTransport, stubAuth } from '../../testing/fakes';
 import { MemoryStore } from '../../testing/memory-store';
 import { newRecording } from './new-recording.polling';
 
-/**
- * Real "List all recordings" response shape (Zoom API v2,
- * GET /users/{userId}/recordings) — the meetings[] + recording_files[] envelope
- * from Zoom's public reference. `next_page_token` is "" on the final page and the
- * per-file `status` is "completed" once processing finishes / "processing" while
- * Zoom is still rendering the artifact.
- */
+/** A "List all recordings" response: `next_page_token` is "" on the final page, per-file `status` is "completed" or "processing". */
 const COMPLETED_MEETING = {
   uuid: 'n0ppXY+tS8eBoORjWM3+Sg==',
   id: 123456789,

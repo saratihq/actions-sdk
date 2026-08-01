@@ -20,10 +20,7 @@ function delivery(payload: unknown, secret = SECRET): WebhookRequest {
   };
 }
 
-/**
- * An `invitee.created` webhook (shape from the public Calendly v2 webhook docs):
- * the invitee fields sit DIRECTLY on `payload`, with a nested `scheduled_event`.
- */
+/** An `invitee.created` webhook: the invitee fields sit directly on `payload`, with a nested `scheduled_event`. */
 const INVITEE_PAYLOAD = {
   created_at: '2026-07-20T17:51:19.000000Z',
   event: 'invitee.created',

@@ -14,10 +14,7 @@ export const LIST_RESPONSES_TYPE = 'typeform.list_responses';
 
 const RESPONSES_PAGE_SIZE = 100;
 
-/**
- * List the submitted responses for a form, newest first, following Typeform's
- * `before`-token cursor up to `limit`. The form picker is live.
- */
+/** List a form's submitted responses, newest first, following Typeform's `before`-token cursor up to `limit`. */
 export const listResponses = defineAction({
   type: LIST_RESPONSES_TYPE,
   name: 'List responses',

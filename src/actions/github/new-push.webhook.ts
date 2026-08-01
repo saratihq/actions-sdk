@@ -43,16 +43,7 @@ interface GithubHook {
   id: number;
 }
 
-/**
- * A REGISTERED webhook trigger: `onEnable` creates a real repo webhook via the
- * GitHub API pointing at a public intake URL and signed with the runtime's
- * per-trigger secret, then returns the hook id as the {@link WebhookRegistration}
- * handle. Inbound deliveries are authenticated by their `X-Hub-Signature-256`
- * HMAC before the payload is trusted; `onDisable` deletes the hook by that id.
- *
- * This exercises the `onEnable`/`onDisable` half of the trigger contract — the
- * register-per-connection webhook shape.
- */
+/** A registered webhook trigger for GitHub pushes: create hook → verify HMAC → transform → delete hook. */
 export const newPush = defineTrigger({
   type: NEW_PUSH_TYPE,
   strategy: 'webhook',
@@ -77,10 +68,7 @@ export const newPush = defineTrigger({
       },
     ],
   },
-  /**
-   * Register a repo webhook pointing at the intake URL, signed with `secret`.
-   * Returns the GitHub hook id so `onDisable` can delete exactly this hook.
-   */
+  /** Register a repo webhook, returning the GitHub hook id so `onDisable` deletes exactly this hook. */
   async onEnable({ http, auth, props, webhookUrl, secret }): Promise<WebhookRegistration> {
     const owner = encodeURIComponent(props.owner);
     const repo = encodeURIComponent(props.repo);
@@ -119,8 +107,7 @@ export const newPush = defineTrigger({
   onRequest({ request }): GithubPushEvent[] {
     // GitHub's event type lives in a header, never the body.
     const eventType = request.headers['x-github-event'];
-    // The `ping` GitHub sends on hook creation is an authentic, signed delivery
-    // that carries no push — acknowledge it (return nothing to fire).
+    // The creation `ping` is an authentic, signed delivery that carries no push — acknowledge it.
     if (eventType !== 'push') return [];
 
     const body = request.body as GithubPushPayload | undefined;

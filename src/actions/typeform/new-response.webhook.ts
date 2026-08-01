@@ -7,23 +7,6 @@ import { formOptions, TYPEFORM_API_BASE, typeformAuth } from './common';
 /** Public type for the registered-webhook trigger. */
 export const NEW_RESPONSE_TYPE = 'typeform.new_response';
 
-/**
- * A REGISTERED webhook trigger for Typeform form submissions. Per Typeform's
- * public webhook contract:
- *  - register/update: `PUT /forms/{form_id}/webhooks/{tag}` with
- *    `{ url, enabled: true, secret, verify_ssl: true }`
- *    (https://www.typeform.com/developers/webhooks/reference/create-or-update-webhook/);
- *  - deliveries are signed `Typeform-Signature: sha256=<base64(HMAC-SHA256(secret, rawBody))>`
- *    (https://www.typeform.com/developers/webhooks/secure-your-webhooks/);
- *  - the body is `{ event_id, event_type: 'form_response', form_response: {…} }`
- *    (https://www.typeform.com/developers/webhooks/example-payload/).
- *
- * The SDK supplies the signing secret. Typeform's delete + update are keyed by a
- * `tag` the SDK chooses; a STABLE tag is derived from the per-trigger `webhookUrl`
- * so two workflows watching the same form never collide and re-enabling is
- * idempotent (PUT upserts the same tag).
- */
-
 /** A Typeform field reference on an answer — matches an answer back to its question. */
 interface TypeformAnswerField {
   id?: string;
@@ -115,11 +98,7 @@ function answerValue(answer: TypeformWebhookAnswer): TypeformNormalisedAnswer['v
   }
 }
 
-/**
- * A stable, filesystem/URL-safe tag derived from the per-trigger `webhookUrl`.
- * Uniqueness of the tag guarantees two workflows watching the same form get
- * distinct Typeform webhooks; determinism makes PUT (upsert) + DELETE idempotent.
- */
+/** A stable per-`webhookUrl` tag: uniqueness keeps two workflows on one form apart, determinism makes PUT/DELETE idempotent. */
 export function tagForWebhookUrl(webhookUrl: string): string {
   const digest = createHash('sha256').update(webhookUrl).digest('hex').slice(0, 24);
   return `orchestr-${digest}`;

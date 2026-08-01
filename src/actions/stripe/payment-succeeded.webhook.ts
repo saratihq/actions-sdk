@@ -25,11 +25,7 @@ interface StripeChargeObject {
   payment_intent?: string | null;
 }
 
-/**
- * A normalised successful-payment event — what a workflow step receives. Trimmed
- * to the fields workflows use; amounts stay in the charge's smallest currency unit
- * (Stripe's convention — cents for USD), paired with `currency`.
- */
+/** A normalised successful-payment event; amounts stay in the currency's smallest unit, paired with `currency`. */
 export interface StripePaymentEvent {
   /** Stripe's event id (`evt_…`) — the delivery-dedup key. */
   eventId: string;
@@ -49,13 +45,7 @@ export interface StripePaymentEvent {
   livemode: boolean;
 }
 
-/**
- * A REGISTERED webhook trigger for Stripe successful charges: `onEnable` creates a
- * Stripe webhook endpoint subscribed to `charge.succeeded`, pointed at the public
- * intake URL; Stripe returns the `whsec_…` signing secret, which is persisted in
- * the registration handle and checked on every inbound `Stripe-Signature` before
- * trusting the payload; `onDisable` deletes the endpoint.
- */
+/** Registered webhook trigger for Stripe successful charges — `onEnable` creates the endpoint, `onDisable` deletes it. */
 export const paymentSucceeded = defineTrigger({
   type: PAYMENT_SUCCEEDED_TYPE,
   strategy: 'webhook',
@@ -87,7 +77,6 @@ export const paymentSucceeded = defineTrigger({
   /** Authenticate the delivery with the endpoint's signing secret before trusting the payload. */
   verify: verifyStripeSignature,
   onRequest({ request }): StripePaymentEvent[] {
-    // Stripe's event type lives in the body; only `charge.succeeded` fires here.
     const event = asStripeEvent<StripeChargeObject>(request.body, EVENT);
     if (!event) return [];
     const charge = event.data.object;

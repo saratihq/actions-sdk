@@ -5,11 +5,7 @@ import { subscriberHash } from './common';
 import { listAudiences } from './lists';
 import { addMember, getMember, updateMember } from './members';
 
-/**
- * Golden offline tests for the Mailchimp actions. A {@link FakeTransport} replays
- * canned responses and records requests, asserting the datacenter-prefixed host,
- * JSON write bodies, and the MD5 subscriber-hash addressing without a connection.
- */
+/** Offline tests for the Mailchimp actions: datacenter host, JSON write bodies, MD5 subscriber-hash addressing. */
 const DC = 'us19';
 const BASE = `https://${DC}.api.mailchimp.com/3.0`;
 

@@ -5,10 +5,7 @@ import { type DriveFileEvent, newFile } from './new-file.polling';
 
 const PROPS = { folderId: '0BwFolderId' };
 
-/**
- * A REAL Google Drive `files.list` response (shape from the public files.list
- * docs): `{ files: [{ id, name, mimeType, createdTime, ... }] }`.
- */
+/** A real Google Drive `files.list` response: `{ files: [{ id, name, mimeType, createdTime, ... }] }`. */
 const FILES_RESPONSE: NormalizedResponse = {
   status: 200,
   headers: {},

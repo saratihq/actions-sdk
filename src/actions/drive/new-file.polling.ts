@@ -4,21 +4,8 @@ import { shortText } from '../../core/props';
 import { DRIVE_FILES_URL, driveAuth } from './common';
 
 /**
- * Polling trigger (`drive.new_file`) — fires for each file created in Google
- * Drive after the trigger is enabled.
- *
- * Why polling rather than push: Google Drive supports per-channel push
- * notifications (`files.watch` / `changes.watch`), but they are a poor fit for
- * this SDK's registered-webhook contract: (1) the notification body is empty —
- * it only signals "something changed" via headers, so you must call `changes.list`
- * with a page token to learn what; (2) there is no HMAC — verification is a
- * plaintext channel token echoed in `X-Goog-Channel-Token`, not a signature over
- * the body, so the SDK's `verify` seam has nothing cryptographic to check; and
- * (3) channels expire (hours to a week) and must be renewed. Polling `files.list`
- * with a `createdTime >` query is correct by construction: the read is
- * server-scoped to files created since the last poll (newest first), the SDK
- * dedupes by file id, and a small overlap window guards the boundary.
- * Docs: https://developers.google.com/workspace/drive/api/reference/rest/v3/files/list
+ * Fires for each file created after the trigger is enabled. Polling, not push: Drive's `files.watch`
+ * body is empty, carries no HMAC, and its channels expire and would need renewal.
  */
 export const DRIVE_NEW_FILE_TYPE = 'drive.new_file';
 
@@ -85,7 +72,7 @@ export const newFile = defineTrigger({
     parents: ['0BwFolderId'],
   },
   async poll({ auth, props, http, lastPolledAt }): Promise<DriveFileEvent[]> {
-    // First activation: baseline the watermark, don't backfill existing files.
+    // First activation baselines the watermark rather than backfilling existing files.
     if (!lastPolledAt) return [];
 
     const cutoff = new Date(Date.parse(lastPolledAt) - OVERLAP_MS).toISOString();

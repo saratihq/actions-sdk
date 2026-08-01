@@ -3,38 +3,8 @@ import { dropdown, shortText } from '../../core/props';
 import { GMAIL_API_BASE, gmailAuth, labelOptions } from './common';
 
 /**
- * Polling trigger (`gmail.new_email`) — fires once per new message matching the
- * (optional) Gmail search, newest first.
- *
- * Why polling rather than push: Gmail has NO direct HTTP webhook — its only push
- * mechanism (`users.watch`) delivers to a Google Cloud Pub/Sub topic, not a
- * per-connection URL that could be registered and received at, so a
- * registered-webhook trigger is structurally impossible here. Polling is the
- * correct approach: list message ids, fetch each new one's headers, and let the
- * SDK dedupe by id. It uses `GET /users/me/messages` (list) +
- * `GET /users/me/messages/{id}` (`format=metadata`, `metadataHeaders`) from Gmail
- * API v1's public contract.
- *
- * Efficiency: `poll` reads the SDK's own dedup set (`seen`, keyed by message id —
- * the same value {@link dedupeKey} returns) and fetches metadata ONLY for ids not
- * seen before, so a quiet mailbox costs one list call, not N gets.
- *
- * INV-1 (first-poll baseline): on an EMPTY watermark the poll self-baselines —
- * it returns `[]` and lets the SDK record `lastPolledAt`, so activating the
- * trigger never backfills the existing inbox. Only mail arriving AFTER activation
- * fires (mirrors the notion/airtable/drive siblings). This holds even if the
- * reconciler's enable() seed poll failed (a transient 429 / OAuth refresh),
- * because the FIRST real poll is itself the baseline — a history burst is
- * structurally impossible, not merely seed-dependent.
- *
- * Completeness: every non-baseline poll bounds the search to `after:<last poll −
- * overlap>` and PAGES the whole window (`nextPageToken`), so a burst larger than
- * one page is never truncated to the newest {@link MAX_RESULTS} — the head window
- * alone would silently drop mail below the top of the list. The overlap +
- * id-dedupe make the boundary re-list a no-op rather than a double-fire.
- *
- * Docs: https://developers.google.com/gmail/api/reference/rest/v1/users.messages/list
- *       https://developers.google.com/gmail/api/reference/rest/v1/users.messages/get
+ * Fires once per new message matching the optional Gmail search. Polling, not push: Gmail's only push
+ * mechanism (`users.watch`) delivers to a Cloud Pub/Sub topic, never a per-connection URL.
  */
 
 export const GMAIL_NEW_EMAIL_TYPE = 'gmail.new_email';
@@ -43,11 +13,7 @@ export const GMAIL_NEW_EMAIL_TYPE = 'gmail.new_email';
 const MAX_RESULTS = 25;
 /** Default search when the author gives none — the inbox. */
 const DEFAULT_QUERY = 'in:inbox';
-/**
- * Overlap (seconds) subtracted from the last-poll watermark before it becomes the
- * `after:` bound, so a message landing around the poll boundary is never skipped;
- * the re-listed overlap is suppressed by id-dedupe (mirrors the Notion trigger).
- */
+/** Subtracted from the watermark before it becomes the `after:` bound; id-dedupe absorbs the re-list. */
 const OVERLAP_SECONDS = 120;
 
 /** A normalised "new email" event — headers + snippet, trimmed to what workflows use. */
@@ -149,19 +115,15 @@ export const newEmail = defineTrigger({
     labelIds: ['INBOX', 'UNREAD'],
   },
   async poll({ auth, props: p, http, store, lastPolledAt }): Promise<GmailNewEmailEvent[]> {
-    // INV-1 first-poll baseline: with no watermark, don't backfill the mailbox.
-    // Return nothing; the SDK records `lastPolledAt` so only mail arriving after
-    // activation fires. Guarantees no historical fan-out even if the enable() seed
-    // poll failed (a failed seed leaves no watermark → this same baseline runs).
+    // First-poll baseline: with no watermark, never backfill the mailbox — a failed enable() seed
+    // leaves no watermark, so this same baseline runs and a history fan-out stays impossible.
     if (!lastPolledAt) return [];
 
     const base = p.query && p.query.trim() !== '' ? p.query : DEFAULT_QUERY;
-    // Bound the search to mail since the last poll (minus an overlap) so a burst
-    // larger than one page is paged in full, never truncated to the newest window.
+    // Bound by `after:` so a burst larger than one page is paged in full, not truncated to the head window.
     const q = `${base} after:${afterEpochSeconds(lastPolledAt)}`;
 
-    // Skip ids the SDK has already emitted — dedupe is keyed by the message id
-    // (see dedupeKey), so this reads the same set the framework maintains.
+    // Skip ids the SDK already emitted; this reads the same set `dedupeKey` populates.
     const seen = new Set((await store.get<string[]>('seen')) ?? []);
     const events: GmailNewEmailEvent[] = [];
     let pageToken: string | undefined;

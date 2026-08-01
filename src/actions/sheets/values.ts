@@ -3,12 +3,7 @@ import type { JsonValue } from '../../core/http/types';
 import { dropdown, json } from '../../core/props';
 import { rangeProp, sheetsAuth, spreadsheetIdProp, toRows, valuesUrl } from './common';
 
-/**
- * Public action type ids. `sheets.insert_row` (Add Row) and `sheets.update_row`
- * (Update Row) reuse the established catalog ids; `read_range` / `clear_sheet`
- * have no underscore catalog id (the established ones are hyphenated, which the
- * action namespace forbids), so they use new underscore ids.
- */
+/** Public action type ids — stable public catalog ids. */
 export const READ_RANGE_TYPE = 'sheets.read_range';
 export const INSERT_ROW_TYPE = 'sheets.insert_row';
 export const UPDATE_ROW_TYPE = 'sheets.update_row';
@@ -46,11 +41,7 @@ export const readRange = defineAction({
   },
 });
 
-/**
- * Append row(s) to the end of a range's data. `values` is one row
- * (`['Ada', 99]`) or an array of rows; `USER_ENTERED` lets Sheets parse numbers,
- * dates and formulas the way the UI would.
- */
+/** Append row(s) to the end of a range's data; `USER_ENTERED` lets Sheets parse values the way the UI would. */
 export const insertRow = defineAction({
   type: INSERT_ROW_TYPE,
   name: 'Add row',

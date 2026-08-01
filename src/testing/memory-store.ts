@@ -1,10 +1,6 @@
 import type { TriggerStore } from '../core/trigger';
 
-/**
- * In-memory {@link TriggerStore} for tests and local runs. Deliberately trivial:
- * a real runtime backs the store with a durable KV, but trigger dedup/watermark
- * logic is testable without one.
- */
+/** In-memory {@link TriggerStore} for tests and local runs; a real runtime backs this with a durable KV. */
 export class MemoryStore implements TriggerStore {
   private readonly data = new Map<string, unknown>();
 

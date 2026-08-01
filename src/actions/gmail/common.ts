@@ -2,12 +2,7 @@ import type { AuthHandle, OAuth2Scheme } from '../../core/auth';
 import type { HttpClient } from '../../core/http/client';
 import type { DropdownOption } from '../../core/props';
 
-/**
- * Shared Gmail (API v1) building blocks: the `/gmail/v1/users/me` endpoints,
- * OAuth2 Bearer auth, and the base64url-`raw` send shape. Bodies and responses
- * are JSON — send carries the RFC822 message as a base64url string inside a JSON
- * `{ raw }`, so no multipart is needed (it works over the managed transport).
- */
+/** Shared Gmail (API v1) building blocks; send rides a base64url `{ raw }` so no multipart is needed. */
 
 export const GMAIL_API_BASE = 'https://gmail.googleapis.com/gmail/v1/users/me';
 
@@ -50,12 +45,7 @@ export async function labelOptions(http: HttpClient, auth: AuthHandle): Promise<
   return labels.map((label) => ({ label: label.name, value: label.id }));
 }
 
-/**
- * Compose a Gmail search string (the `q` param) from the common structured
- * filters, using Gmail's public `from:`/`to:`/`subject:` search operators. Values
- * with spaces are quoted so a multi-word subject stays one operator. An extra raw
- * `query` is appended verbatim for power users.
- */
+/** Compose a Gmail `q` from structured filters; values with spaces are quoted to stay one operator. */
 export function buildSearchQuery(filters: {
   from?: string;
   to?: string;
@@ -75,10 +65,7 @@ function quoteIfNeeded(value: string): string {
   return /\s/.test(trimmed) ? `"${trimmed}"` : trimmed;
 }
 
-/**
- * Build an RFC822 message and base64url-encode it for Gmail's `raw` field. The
- * header/body layout and base64url encoding follow the email and Gmail specs.
- */
+/** Build an RFC822 message and base64url-encode it for Gmail's `raw` field. */
 export function buildRawMessage(input: {
   to: string;
   subject: string;

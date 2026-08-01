@@ -12,11 +12,7 @@ export interface PostMessageResponse extends SlackEnvelope {
   message?: { text?: string; user?: string; bot_id?: string };
 }
 
-/**
- * Post a message to a channel, with a **live-fetched channel picker** instead of
- * a pasted channel ID. Exercises the action contract, the dynamic dropdown
- * loader, and the auth seam end to end.
- */
+/** Post a message to a channel, with a live-fetched channel picker instead of a pasted channel id. */
 export const sendChannelMessage = defineAction({
   type: SEND_CHANNEL_MESSAGE_TYPE,
   name: 'Send message to a channel',
@@ -27,7 +23,6 @@ export const sendChannelMessage = defineAction({
       label: 'Channel',
       description: 'The channel to post to — loaded live from your workspace.',
       required: true,
-      // Options fetched live from the user's connection, no pasted IDs.
       options: async ({ auth, http }) => {
         const channels = await listSlackChannels(http, auth, { maxItems: 1000 });
         return channels.map((channel) => ({ label: `#${channel.name}`, value: channel.id }));
@@ -53,8 +48,7 @@ export const sendChannelMessage = defineAction({
   async run({ auth, props, http }): Promise<PostMessageResponse> {
     const res = await http.post<PostMessageResponse>(`${SLACK_API_BASE}/chat.postMessage`, {
       auth,
-      // POST is not idempotent — the client will not retry it on an ambiguous 5xx,
-      // so a transient failure never risks a double-post.
+      // POST is not idempotent, so the client must never retry it on an ambiguous 5xx.
       body: {
         channel: props.channel,
         text: props.text,

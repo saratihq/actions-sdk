@@ -33,13 +33,7 @@ function tableUrl(baseId: string, tableId: string): string {
   return `${AIRTABLE_API_BASE}/${encodeURIComponent(baseId)}/${encodeURIComponent(tableId)}`;
 }
 
-/**
- * Create a record. The **base picker is live**; the table picker depends on the
- * chosen base, so `tableId` is a text input until the loader contract can pass
- * set-prop values. `fields` is the record's `{ column: value }` map; `typecast`
- * lets Airtable coerce strings to the column type (create select options on the
- * fly, parse dates).
- */
+/** Create a record; `tableId` is free text because the loader contract cannot pass the chosen base. */
 export const createRecord = defineAction({
   type: CREATE_RECORD_TYPE,
   name: 'Create record',
@@ -89,10 +83,7 @@ export const getRecord = defineAction({
   },
 });
 
-/**
- * List records in a table, following Airtable's `offset` cursor up to
- * `maxRecords`. Optional `filterByFormula` and `view` scope the read.
- */
+/** List records in a table, following Airtable's `offset` cursor up to `maxRecords`. */
 export const listRecords = defineAction({
   type: LIST_RECORDS_TYPE,
   name: 'List records',

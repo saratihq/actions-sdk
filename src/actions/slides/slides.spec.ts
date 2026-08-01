@@ -3,11 +3,6 @@ import type { NormalizedRequest, NormalizedResponse } from '../../core/http/type
 import { FakeTransport, stubAuth } from '../../testing/fakes';
 import { createPresentation, getPresentation } from './presentations';
 
-/**
- * Golden offline tests for the Google Slides actions. A {@link FakeTransport}
- * replays canned API v1 responses and records the request. (See
- * slides.live.spec.ts for the live smoke tests.)
- */
 function fake(handler: (req: NormalizedRequest, i: number) => NormalizedResponse) {
   const transport = new FakeTransport(handler);
   return { auth: stubAuth(transport, 'oauth2'), http: new HttpClient(), transport };

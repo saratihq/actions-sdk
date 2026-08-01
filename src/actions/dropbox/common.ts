@@ -4,19 +4,8 @@ import type { HttpClient } from '../../core/http/client';
 import type { JsonValue } from '../../core/http/types';
 
 /**
- * Shared Dropbox (API v2) building blocks: the `/2/files/*` RPC endpoints, OAuth2
- * Bearer auth, the JSON request/response envelopes, and the `.tag`-discriminated
- * metadata shape are Dropbox's public contract.
- *
- * MANAGED-FILE LIMITATION: Dropbox splits its API across two hosts —
- * `api.dropboxapi.com` for JSON RPC (list/metadata/search/create-folder/
- * temporary-link) and `content.dropboxapi.com` for the binary upload/download
- * endpoints (`/files/upload`, `/files/download`), which carry the file bytes in
- * the body with a `Dropbox-API-Arg` header. The managed proxy carries JSON only,
- * so those content endpoints can't ride the managed transport. These actions
- * therefore cover the JSON-metadata surface only — no binary upload/download.
- * `get_temporary_link` returns a short-lived direct download URL (JSON), which is
- * the managed-safe way to hand a caller a file's contents.
+ * Shared Dropbox (API v2) building blocks: the `/2/files/*` RPC endpoints and `.tag`-discriminated metadata.
+ * JSON-metadata surface only — `content.dropboxapi.com` binary endpoints cannot ride the managed proxy.
  */
 
 /** All the JSON-RPC file endpoints live under this host. */
@@ -28,11 +17,7 @@ export const dropboxAuth: OAuth2Scheme = {
   scopes: ['files.metadata.read', 'files.content.read', 'files.content.write'],
 };
 
-/**
- * A Dropbox file/folder metadata entry, trimmed to the fields reads surface. The
- * `.tag` discriminator (`file` | `folder` | `deleted`) is a literal key in
- * Dropbox's JSON, so it is quoted here.
- */
+/** A Dropbox metadata entry; `.tag` (`file` | `folder` | `deleted`) is a literal key in Dropbox's JSON. */
 export interface DropboxEntry {
   ['.tag']?: string;
   name: string;
@@ -74,13 +59,7 @@ export interface DropboxTemporaryLink {
 
 const DEFAULT_MAX_PAGES = 50;
 
-/**
- * Follow Dropbox's cursor pagination for `list_folder`. Unlike a query-cursor API,
- * Dropbox advances by POSTing the cursor to a DIFFERENT endpoint
- * (`/files/list_folder/continue`), so the generic `paginate` helper (GET + query
- * cursor) doesn't fit — this is the small hand-rolled loop it calls for instead.
- * Bounded by `maxItems` and a hard page cap so a runaway cursor can't loop forever.
- */
+/** Hand-rolled `list_folder` paging: Dropbox advances by POSTing the cursor to a DIFFERENT endpoint. */
 export async function listFolderPaged(
   http: HttpClient,
   auth: AuthHandle,

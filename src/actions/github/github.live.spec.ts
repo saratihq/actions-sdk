@@ -3,15 +3,7 @@ import { HttpClient } from '../../core/http/client';
 import { liveDescribe } from '../../testing/live';
 import { githubTokenAuth, listIssues } from './list-issues';
 
-/**
- * LIVE smoke test for the DIRECT transport: github.list_issues runs against the real
- * GitHub REST API, unauthenticated, over a public repository — proving the
- * direct transport, the apiKey auth scheme (here with a `none` credential), and
- * Link-header pagination. Gated behind ORCHESTR_LIVE; no managed connection needed.
- *
- * A public repo with thousands of open issues means collecting >100 issues can
- * only happen by following the `Link: rel="next"` header across pages.
- */
+/** LIVE smoke test: github.list_issues against the real REST API, unauthenticated. Gated by ORCHESTR_LIVE. */
 liveDescribe('github — live via direct transport (unauthenticated)', () => {
   // Same action, same seam — a `none` credential just skips the Authorization header.
   const auth = createDirectAuth(githubTokenAuth, { type: 'none' });

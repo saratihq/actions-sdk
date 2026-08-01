@@ -1,11 +1,7 @@
 import type { AuthHandle } from '../../core/auth';
 import type { HttpClient } from '../../core/http/client';
 
-/**
- * Shared Hacker News building blocks. The public Firebase API
- * (`hacker-news.firebaseio.com/v0`) needs no credentials (a `none` auth scheme),
- * so both the action and the polling trigger read it over the direct transport.
- */
+/** Shared Hacker News building blocks — the public Firebase API needs no credentials. */
 
 export const HN_BASE = 'https://hacker-news.firebaseio.com/v0';
 

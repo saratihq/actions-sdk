@@ -6,11 +6,7 @@ import { GRAPH_ME_BASE, odataNextLink, type OutlookMailFolder, outlookAuth } fro
 /** Public action type id — no reusable equivalent exists, so a new underscore id. */
 export const LIST_FOLDERS_TYPE = 'outlook.list_folders';
 
-/**
- * List the mailbox's mail folders (Inbox, Sent Items, custom folders, …),
- * following Graph's `@odata.nextLink` cursor up to `limit`. The folder ids feed
- * the `folderId` input on `list_messages`. Also the benign live-smoke read.
- */
+/** List mail folders, walking `@odata.nextLink` up to `limit`; the ids feed `folderId` on `list_messages`. */
 export const listFolders = defineAction({
   type: LIST_FOLDERS_TYPE,
   name: 'List folders',

@@ -8,14 +8,8 @@ import { mistralGenerateText } from './mistral';
 import { openaiGenerateText } from './openai';
 
 /**
- * LIVE smoke tests for the generate_text family over the DIRECT transport — each runs
- * a real generation against the provider's public REST API and asserts non-empty
- * text back. Gated behind ORCHESTR_LIVE; each provider additionally self-skips
- * when its API key env var is unset (so `pnpm test` stays green offline and no
- * proof is ever faked). Cheap models + a tiny token cap keep the spend minimal.
- *
- * Required env (per provider you want to exercise):
- *   OPENAI_API_KEY, ANTHROPIC_API_KEY, GEMINI_API_KEY, MISTRAL_API_KEY
+ * LIVE generate_text smoke tests over the direct transport; gated behind ORCHESTR_LIVE.
+ * Each provider self-skips unless OPENAI_API_KEY / ANTHROPIC_API_KEY / GEMINI_API_KEY / MISTRAL_API_KEY is set.
  */
 liveDescribe('ai — live generate_text via direct transport', () => {
   const http = new HttpClient();

@@ -1,14 +1,7 @@
 import type { AuthScheme } from './auth';
 import type { AnyPropSchema, DropdownOption, PropsSchema } from './props';
 
-/**
- * Serialisation to the platform catalog shape. The client inspector renders
- * props by an UPPERCASE `type` (SHORT_TEXT, DROPDOWN, …); mapping the SDK's
- * schemas onto those tags lets an action drop into the catalog with no client
- * change. Dynamic dropdowns emit no static `options` — they're resolved at
- * runtime via the action's option loader.
- */
-
+/** Prop tags the client inspector renders by — must stay in lockstep with the client's renderer. */
 export type ManifestPropType =
   | 'SHORT_TEXT'
   | 'LONG_TEXT'

@@ -1,10 +1,6 @@
 import type { OAuth2Scheme } from '../../core/auth';
 
-/**
- * Shared Google Docs (API v1) building blocks: the `/v1/documents` endpoints,
- * OAuth2 Bearer auth, the `documents.create` `{ title }` body, and the
- * `batchUpdate` `insertText` request. JSON throughout — no multipart.
- */
+/** Shared Google Docs (API v1) building blocks: `/v1/documents`, OAuth2 bearer auth, and `batchUpdate`. */
 
 export const DOCS_API_BASE = 'https://docs.googleapis.com/v1/documents';
 
@@ -28,11 +24,7 @@ export interface GoogleDoc {
   body?: { content?: StructuralElement[] };
 }
 
-/**
- * Derive the plain text of a document from its body content — the useful shape
- * for a downstream step (email the contents, summarise, etc.). It reads only
- * Google's own `textRun.content` and adds nothing.
- */
+/** Derive a document's plain text from its body content, reading only Google's own `textRun.content`. */
 export function docPlainText(doc: GoogleDoc): string {
   const parts: string[] = [];
   for (const element of doc.body?.content ?? []) {

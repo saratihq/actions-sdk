@@ -156,13 +156,7 @@ interface HubspotSearchResponse {
   paging?: { next?: { after?: string } };
 }
 
-/**
- * Search contacts by a free-text `query`, or by a single property filter
- * (`propertyName` OPERATOR `value`), following the CRM v3 search `paging.next.after`
- * cursor up to `limit`. Search pages inside the POST body (the cursor is `after`
- * in, `paging.next.after` out), so this is a small hand-rolled POST loop rather
- * than the GET-oriented `paginate` helper.
- */
+/** Search contacts by free text or one property filter; search pages inside the POST body, not the query. */
 export const searchContacts = defineAction({
   type: SEARCH_CONTACTS_TYPE,
   name: 'Search contacts',

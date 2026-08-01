@@ -1,13 +1,4 @@
-/**
- * The ONE failure shape.
- *
- * Every failure an action can surface — a transport that never connected, a
- * 429, a 500, a provider envelope that says `ok: false`, invalid input — is
- * normalised to this single object. Callers (the runtime, the client
- * inspector, a retry loop) branch on `retryable` and show `message`; they never
- * have to know which layer failed. The contract: every failure normalises to one
- * shape `{ status, message, retryable }`.
- */
+/** The ONE failure shape: every failure, from any layer, normalises to `{ status, message, retryable }`. */
 export interface NormalizedFailure {
   /** HTTP-ish status. `0` means the request never got a response (network/timeout/abort). */
   status: number;
@@ -43,11 +34,7 @@ interface ActionErrorArgs {
   cause?: unknown;
 }
 
-/**
- * The single error type the SDK throws across every boundary. It carries enough
- * for a caller to decide what to do (`code`, `status`, `retryable`) and reduces
- * to the wire contract via {@link ActionError.toFailure}.
- */
+/** The single error type the SDK throws; reduces to the wire contract via {@link ActionError.toFailure}. */
 export class ActionError extends Error {
   readonly code: ActionErrorCode;
   readonly status: number;
@@ -68,11 +55,7 @@ export class ActionError extends Error {
   }
 }
 
-/**
- * Retry policy by status. Transport failures (status 0) and the transient HTTP
- * statuses are retryable; ordinary 4xx (the caller's request is wrong) are not.
- * 501/505 are "the server will never do this" — not worth a retry.
- */
+/** Retry policy by status: transport failures and transient statuses retry, ordinary 4xx and 501/505 do not. */
 export function isRetryableStatus(status: number): boolean {
   if (status === 0) return true; // no response — network/timeout/abort
   if (status === 408 || status === 425 || status === 429) return true; // timeout / too-early / rate-limited
@@ -80,12 +63,7 @@ export function isRetryableStatus(status: number): boolean {
   return status >= 500 && status <= 599;
 }
 
-/**
- * Normalise ANY thrown value to {@link NormalizedFailure}. The catch-all seam:
- * an `ActionError` reduces directly; a Node fetch/undici error maps by its
- * `code`; everything else becomes a non-retryable unknown so a bug never
- * masquerades as a transient blip a retry loop spins on forever.
- */
+/** Normalise ANY thrown value to {@link NormalizedFailure}; unrecognised throws are non-retryable so a bug never spins a retry loop. */
 export function normalizeError(err: unknown): NormalizedFailure {
   if (err instanceof ActionError) return err.toFailure();
 
@@ -117,12 +95,7 @@ export function normalizeError(err: unknown): NormalizedFailure {
   return { status: 0, message: 'unexpected non-error thrown', retryable: false };
 }
 
-/**
- * Scrub credential-shaped substrings from a message before it is stored or
- * logged. Defence in depth: transports already keep secrets out of errors, but
- * a provider might echo a token in a body, or a URL might carry
- * `?access_token=…`. Best-effort, never throws.
- */
+/** Scrub credential-shaped substrings from a message before it is logged; best-effort, never throws. */
 export function redactSecrets(text: string): string {
   if (typeof text !== 'string' || text.length === 0) return text;
   return (

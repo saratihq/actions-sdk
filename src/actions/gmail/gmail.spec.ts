@@ -5,12 +5,7 @@ import { buildRawMessage, buildSearchQuery } from './common';
 import { listLabels } from './labels';
 import { findEmail, getProfile, listMessages, sendEmail } from './messages';
 
-/**
- * Golden offline tests for the Gmail actions. A {@link FakeTransport} replays
- * canned API v1 responses and records requests, asserting the base64url `raw`
- * send shape, `nextPageToken` pagination, and the live label picker without a
- * connection. (See gmail.live.spec.ts for the live smoke tests.)
- */
+/** Golden offline tests for the Gmail actions, driven by a {@link FakeTransport}. */
 function fake(handler: (req: NormalizedRequest, i: number) => NormalizedResponse) {
   const transport = new FakeTransport(handler);
   return { auth: stubAuth(transport, 'oauth2'), http: new HttpClient(), transport };

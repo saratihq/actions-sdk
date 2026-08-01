@@ -1,10 +1,4 @@
-/**
- * Orchestr Action SDK — public API.
- *
- * Transport-agnostic actions & triggers. `createAuthHandle`/`transportOf` are
- * intentionally NOT exported — the transport stays unreachable from action code
- * (the auth seam).
- */
+/** Orchestr Action SDK public API — `createAuthHandle`/`transportOf` stay unexported so the transport is unreachable from action code. */
 
 // Errors — the one failure shape.
 export {
@@ -73,8 +67,7 @@ export {
   type PaginateOptions,
 } from './core/http/pagination';
 export { backoffDelay, DEFAULT_RETRY_POLICY, parseRetryAfter, type RetryPolicy } from './core/http/retry';
-// SSRF guard for user-controlled outbound URLs — the single choke point every
-// fully user-supplied URL boundary passes through (host allowlist honored).
+// SSRF guard — the single choke point every fully user-supplied outbound URL passes through.
 export { assertPublicUrl, guardUserUrl, isBlockedIp, ssrfAllowedHostsFromEnv } from './core/http/ssrf';
 
 // Props — typed prop kinds + boundary validation.
@@ -141,8 +134,7 @@ export {
   toManifestEntry,
 } from './core/catalog';
 
-// The tool-aware model call for the AI Agent node — a loop-internal engine
-// primitive driven by the host agent loop, not a catalog action.
+// The tool-aware model call for the AI Agent node — a loop-internal primitive, not a catalog action.
 export {
   type AgentConversationMessage,
   type AgentModelAdapter,

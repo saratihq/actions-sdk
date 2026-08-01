@@ -3,11 +3,7 @@ import { guardUserUrl } from '../../core/http/ssrf';
 import type { JsonValue } from '../../core/http/types';
 import { json, longText, shortText } from '../../core/props';
 
-/**
- * GraphQL utility — a no-auth (`none` scheme) action. Posts a query (+
- * variables) to any GraphQL endpoint and returns the `data`/`errors` envelope.
- * Auth, when needed, rides the `headers` prop (e.g. an Authorization bearer).
- */
+/** GraphQL utility — a no-auth action; any credential rides the caller's `headers` prop. */
 
 function toHeaderRecord(value: JsonValue | undefined): Record<string, string> {
   const out: Record<string, string> = {};
@@ -41,8 +37,7 @@ export const sendRequest = defineAction({
     headers: json({ label: 'Headers', description: 'A JSON object of request headers.', required: false }),
   },
   async run({ auth, props, http }): Promise<GraphqlResult> {
-    // SSRF guard: the endpoint URL is fully user-controlled on the no-auth direct
-    // transport — block private/internal/cloud-metadata targets before posting.
+    // SSRF guard: this URL is fully user-controlled, so block private/internal targets before posting.
     await guardUserUrl(props.url);
     const body: { [k: string]: JsonValue } = { query: props.query };
     if (props.variables !== undefined) body.variables = props.variables;

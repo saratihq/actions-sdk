@@ -13,10 +13,7 @@ export const LIST_AUDIENCES_TYPE = 'mailchimp.list_audiences';
 export const GET_LIST_TYPE = 'mailchimp.get_list';
 export const LIST_CAMPAIGNS_TYPE = 'mailchimp.list_campaigns';
 
-/**
- * List audiences (lists). Read-only and the benign live-smoke action for
- * Mailchimp. One page (accounts have few audiences); `count` caps it.
- */
+/** List audiences (lists) — a single page, capped by `count`. */
 export const listAudiences = defineAction({
   type: LIST_AUDIENCES_TYPE,
   name: 'List audiences',

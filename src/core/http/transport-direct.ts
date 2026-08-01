@@ -20,13 +20,7 @@ export interface DirectTransportOptions {
   fetchImpl?: FetchLike;
 }
 
-/**
- * Sends requests straight to the provider, attaching the BYO credential per the
- * declared {@link AuthScheme}. This is the self-host / bring-your-own-key rail:
- * no proxy, near-zero marginal cost. It returns non-2xx responses rather than
- * throwing — retry/error decisions belong to the client, uniformly across
- * transports.
- */
+/** Sends straight to the provider with the BYO credential attached per the declared {@link AuthScheme}. */
 export class DirectTransport implements Transport {
   readonly kind = 'direct';
   private readonly scheme: AuthScheme;
@@ -53,8 +47,7 @@ export class DirectTransport implements Transport {
     res.headers.forEach((value, key) => {
       headers[key.toLowerCase()] = value;
     });
-    // A binary read hands back the raw bytes verbatim — never text-decoded (that
-    // would corrupt them) — so an action can pass a downloaded file downstream.
+    // Binary hands back raw bytes verbatim — text-decoding them would corrupt the file.
     if (prepared.responseType === 'binary') {
       const bytes = Buffer.from(await res.arrayBuffer());
       return { status: res.status, headers, data: bytes };
@@ -63,13 +56,7 @@ export class DirectTransport implements Transport {
     return { status: res.status, headers, data: parseBody(text, headers['content-type']) };
   }
 
-  /**
-   * Serialise the request body for the wire and set its Content-Type. A
-   * multipart body is encoded to raw bytes with a boundary header; a form body is
-   * encoded to a `key=value&…` string with the url-encoded content-type; a JSON
-   * body is stringified (both special bodies mutate the already-copied
-   * `prepared.headers`); absent → no body.
-   */
+  /** Serialise the body for the wire and set its Content-Type on the already-copied `prepared.headers`. */
   private encodeBody(prepared: NormalizedRequest): string | Buffer | undefined {
     if (prepared.body === undefined) return undefined;
     if (isMultipartBody(prepared.body)) {
@@ -86,7 +73,6 @@ export class DirectTransport implements Transport {
 
   /** Attach the credential to a COPY of the request (never mutate the caller's object). */
   private applyAuth(request: NormalizedRequest): NormalizedRequest {
-    // A single mutable copy the branches (and custom.apply) write into.
     const prepared: NormalizedRequest = { ...request, headers: { ...request.headers } };
     const cred = this.credential;
 

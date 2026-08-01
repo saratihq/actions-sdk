@@ -12,13 +12,7 @@ import {
   toAttendees,
 } from './common';
 
-/**
- * Public action type ids. Most are aligned to the established catalog ids so
- * that existing plans referencing those ids resolve to these actions;
- * `create` / `get by id` / `list` / `update` / `delete` each reuse an
- * underscore catalog id. Only `list_calendars` uses a new id, as no equivalent
- * existed before.
- */
+/** Public catalog ids — stable; existing plans reference them verbatim. */
 export const CREATE_EVENT_TYPE = 'calendar.create_google_calendar_event';
 export const LIST_EVENTS_TYPE = 'calendar.google_calendar_get_events';
 export const GET_EVENT_TYPE = 'calendar.google_calendar_get_event_by_id';
@@ -30,11 +24,7 @@ function timed(dateTimeIso: string): Record<string, JsonValue> {
   return { dateTime: dateTimeIso };
 }
 
-/**
- * Create an event on a calendar. `start` is required; `end` defaults to 30 minutes
- * after it (mirroring the Calendar UI) when omitted. Times are RFC3339 strings
- * (e.g. `2026-07-10T10:00:00-04:00` or `…Z`). `attendees` is an array of emails.
- */
+/** Create an event; RFC3339 times, and `end` defaults to start + 30 minutes. */
 export const createEvent = defineAction({
   type: CREATE_EVENT_TYPE,
   name: 'Create event',
@@ -77,11 +67,7 @@ export const createEvent = defineAction({
   },
 });
 
-/**
- * List events on a calendar within an optional time window, expanding recurring
- * events into single instances ordered by start time, following `nextPageToken`
- * up to `limit`. `query` free-text searches event fields.
- */
+/** List events in an optional window, expanding recurrences into instances, following `nextPageToken`. */
 export const listEvents = defineAction({
   type: LIST_EVENTS_TYPE,
   name: 'Get all events',
@@ -139,10 +125,7 @@ export const getEvent = defineAction({
   },
 });
 
-/**
- * Update an event. Only the supplied fields are changed (a PATCH) — omitted props
- * are left as they are, so this never blanks a field the caller didn't set.
- */
+/** Update an event via PATCH — omitted props are left unchanged, never blanked. */
 export const updateEvent = defineAction({
   type: UPDATE_EVENT_TYPE,
   name: 'Update event',

@@ -6,11 +6,7 @@ import { plainTitle } from './common';
 import { queryDatabase, search } from './databases';
 import { createPage } from './pages';
 
-/**
- * Golden offline tests for the Notion actions. A {@link FakeTransport} replays
- * canned responses and records requests, asserting the Notion-Version header, the
- * search/create bodies, and the live database picker without a connection.
- */
+/** Offline harness: a {@link FakeTransport} replays canned Notion responses and records requests. */
 function fake(handler: (req: NormalizedRequest, i: number) => NormalizedResponse) {
   const transport = new FakeTransport(handler);
   return { auth: stubAuth(transport, 'apiKey'), http: new HttpClient(), transport };

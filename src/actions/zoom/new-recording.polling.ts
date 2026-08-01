@@ -4,42 +4,10 @@ import type { HttpClient } from '../../core/http/client';
 import type { PropsSchema } from '../../core/props';
 import { ZOOM_API_BASE, zoomAuth } from './common';
 
-/**
- * Polling trigger (`zoom.new_recording`) — fires once per cloud recording session
- * as it becomes available.
- *
- * STRATEGY CHOICE: Zoom's `recording.completed` webhook is configured on the
- * *app* in the Marketplace (a single account/app-level Event Subscription), NOT
- * registerable per connection through a public REST API — so the register-per-
- * connection webhook shape (github.new_push) structurally can't apply here. Zoom
- * *does* expose a first-class list API for cloud recordings, so the trigger polls
- * it and lets the SDK dedupe by the meeting UUID. `GET /users/{userId}/recordings`,
- * the `from`/`to` (yyyy-mm-dd) + `page_size` + `next_page_token` window, and the
- * `{ meetings: [{ …, recording_files: [...] }] }` envelope are Zoom API v2's public
- * contract.
- *
- * CORRECTNESS (per the API doc): `from` filters by the meeting's *start* date, but
- * cloud recordings finish processing minutes-to-hours after the meeting ends, so a
- * meeting that started just before UTC-midnight (or was processed late) never lands
- * in a same-day `from=<today>` window. The poll therefore anchors `from` to a
- * rolling {@link LOOKBACK_DAYS}-day lookback before the watermark; the meeting-uuid
- * dedupe
- * suppresses the overlap those extra days re-list. A session is only emitted once
- * *every* `recording_files[].status` is `completed`, so a still-processing session
- * is skipped (and left out of the dedupe set) to re-appear and fire exactly once
- * when it finishes. All pages are drained via `next_page_token`, not just the first.
- *
- * Docs: https://developers.zoom.us/docs/api/rest/reference/zoom-api/methods/#operation/recordingsList
- */
-
+/** Polling trigger (`zoom.new_recording`) — fires once per cloud recording session, deduped by meeting UUID. */
 export const ZOOM_NEW_RECORDING_TYPE = 'zoom.new_recording';
 
-/**
- * Rolling lookback (calendar days) applied to `from` before the watermark date.
- * `from` filters by meeting *start* while processing lags, so a same-day window
- * misses cross-midnight-UTC and late-processed recordings; the uuid dedupe drops
- * the re-listed overlap.
- */
+/** `from` filters by meeting START while processing lags, so the window must look back — the uuid dedupe drops the re-listed overlap. */
 const LOOKBACK_DAYS = 2;
 /** Zoom's max page size for the recordings list. */
 const PAGE_SIZE = 300;
@@ -131,20 +99,12 @@ function lookbackParam(watermark: Date): string {
   return toDateParam(new Date(watermark.getTime() - LOOKBACK_DAYS * DAY_MS).toISOString());
 }
 
-/**
- * A session is emittable only once *every* recording file has finished processing
- * (`status === 'completed'`). A session with a still-processing file is skipped so
- * it is not burned into the dedupe set — it re-appears next poll and fires exactly
- * once when Zoom reports it fully processed.
- */
+/** A part-processed session must be skipped, not emitted, or it burns into the dedupe set before its files are ready. */
 function isFullyProcessed(event: ZoomRecordingEvent): boolean {
   return event.files.length > 0 && event.files.every((f) => f.status === 'completed');
 }
 
-/**
- * Drain every page of `GET /users/me/recordings` from `from`, following Zoom's
- * `next_page_token` until it comes back empty (or the {@link MAX_PAGES} guard trips).
- */
+/** Drain every page of `GET /users/me/recordings` from `from`, up to the {@link MAX_PAGES} guard. */
 async function listRecordings(
   http: HttpClient,
   auth: AuthHandle,
@@ -229,11 +189,8 @@ export const newRecording = defineTrigger({
     ],
   },
   async poll({ auth, http, store, lastPolledAt }): Promise<ZoomRecordingEvent[]> {
-    // INV-1 self-baseline: on an empty watermark, don't emit the historical window.
-    // Record the uuids of recordings that already exist (across the same lookback a
-    // real poll would use) into the dedupe set so pre-enable sessions never fire,
-    // then emit nothing. The harness persists the watermark (= now), so the next
-    // poll's lookback is fully covered by these keys and re-lists nothing new.
+    // Self-baseline: on an empty watermark, record existing uuids into the dedupe set
+    // and emit nothing, so pre-enable sessions never fire.
     if (!lastPolledAt) {
       const existing = await listRecordings(http, auth, lookbackParam(new Date()));
       const seen = existing.map((m) => m.uuid).filter((u): u is string => typeof u === 'string');

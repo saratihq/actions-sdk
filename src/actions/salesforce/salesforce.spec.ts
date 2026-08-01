@@ -3,11 +3,6 @@ import type { NormalizedRequest, NormalizedResponse } from '../../core/http/type
 import { FakeTransport, stubAuth } from '../../testing/fakes';
 import { createRecord, deleteRecord, getRecord, runQuery, updateRecord } from './records';
 
-/**
- * Golden offline tests for the Salesforce actions. A {@link FakeTransport} replays
- * canned REST responses and records requests, asserting the instance/version URL
- * shaping, JSON write bodies, and the 204-no-content handling without a connection.
- */
 const INSTANCE = 'https://acme.my.salesforce.com';
 const BASE = `${INSTANCE}/services/data/v58.0`;
 

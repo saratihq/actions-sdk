@@ -2,7 +2,7 @@ import { defineAction } from '../../core/action';
 import { shortText } from '../../core/props';
 import { type Presentation, SLIDES_API_BASE, slidesAuth } from './common';
 
-/** Public action type ids — `get_presentation` reuses the existing catalog id; `create` is a new id. */
+/** Public action type ids — stable public catalog ids. */
 export const CREATE_PRESENTATION_TYPE = 'slides.create_presentation';
 export const GET_PRESENTATION_TYPE = 'slides.get_presentation';
 

@@ -2,9 +2,7 @@ import type { PDFPage } from 'pdf-lib';
 
 import { ActionError } from '../../core/errors';
 
-/**
- * Shared helpers for the `pdf` actions (page targeting + rotation mapping).
- */
+/** Shared helpers for the `pdf` actions (page targeting + rotation mapping). */
 
 /** A file-ish value as it may arrive through a `json` array prop or a `file` prop. */
 interface FileLike {
@@ -12,12 +10,7 @@ interface FileLike {
   base64?: unknown;
 }
 
-/**
- * Coerce an arbitrary file payload into bytes. Handles a raw Buffer/Uint8Array, a
- * base64 string, or a JSON-serialised Buffer (`{ type: 'Buffer', data: [...] }`) —
- * the shapes a file can take once it has crossed a JSON boundary. Throws a clear
- * `invalid_input` on anything else rather than letting pdf-lib fail opaquely.
- */
+/** Coerce a file payload into bytes — raw bytes, base64, or a JSON-serialised Buffer; throws `invalid_input` otherwise. */
 export function toBytes(value: unknown, label = 'file'): Uint8Array {
   if (Buffer.isBuffer(value)) return new Uint8Array(value);
   if (value instanceof Uint8Array) return value;

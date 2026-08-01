@@ -5,12 +5,7 @@ import { createContact, listContacts, searchContacts } from './contacts';
 import { createDeal } from './deals';
 import { listOwners } from './owners';
 
-/**
- * Golden offline tests for the HubSpot actions. A {@link FakeTransport} replays
- * canned CRM v3 envelopes and records requests, so the tests assert the
- * `{ properties }` write shape, `paging.next.after` pagination, the search
- * filterGroups, and the live owner picker without a connection.
- */
+/** Golden offline tests for the HubSpot actions, driven by a {@link FakeTransport}. */
 const CONTACTS = 'https://api.hubapi.com/crm/v3/objects/contacts';
 
 function fake(handler: (req: NormalizedRequest, i: number) => NormalizedResponse) {

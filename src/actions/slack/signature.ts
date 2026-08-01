@@ -5,13 +5,7 @@ import type { WebhookRequest } from '../../core/trigger';
 /** Default replay window: Slack recommends rejecting requests older than 5 minutes. */
 const DEFAULT_TOLERANCE_SEC = 60 * 5;
 
-/**
- * Verify a Slack request signature (the `v0` scheme). The signature base string
- * is `v0:{timestamp}:{rawBody}`, HMAC-SHA256 with the app signing secret, hex,
- * prefixed `v0=`. Comparison is timing-safe; stale timestamps are rejected to
- * defeat replays. Returns false (never throws) for any missing/malformed input,
- * so a spoofed request can't crash the handler into a different code path.
- */
+/** Verify a Slack `v0` request signature (timing-safe, replay-windowed); returns false rather than throwing on any malformed input. */
 export function verifySlackSignature(
   request: WebhookRequest,
   signingSecret: string,

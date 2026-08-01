@@ -70,12 +70,7 @@ export const getDatabase = defineAction({
   },
 });
 
-/**
- * Query the rows (pages) of a database with optional filter/sorts, following
- * Notion's `start_cursor` pagination up to `limit`. The database picker is live;
- * the filter is raw Notion JSON (its shape depends on the DB's own columns, which
- * a picker can't yet resolve).
- */
+/** Query a database's rows with optional raw-JSON filter/sorts, paging up to `limit`. */
 export const queryDatabase = defineAction({
   type: QUERY_DATABASE_TYPE,
   name: 'Query database',

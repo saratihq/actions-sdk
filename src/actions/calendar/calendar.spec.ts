@@ -5,13 +5,7 @@ import { listCalendars } from './calendars';
 import { defaultEnd, toAttendees } from './common';
 import { createEvent, deleteEvent, getEvent, listEvents, updateEvent } from './events';
 
-/**
- * Golden offline tests for the Google Calendar actions. A {@link FakeTransport}
- * replays canned API v3 responses and records requests, asserting the event body
- * shape, the +30-min default end, PATCH partial-update semantics, the delete 204
- * synthesis, `nextPageToken` pagination, and the live calendar picker without a
- * connection.
- */
+/** Golden offline tests for the Google Calendar actions, driven by a {@link FakeTransport}. */
 function fake(handler: (req: NormalizedRequest, i: number) => NormalizedResponse) {
   const transport = new FakeTransport(handler);
   return { auth: stubAuth(transport, 'oauth2'), http: new HttpClient(), transport };
@@ -52,7 +46,6 @@ describe('calendar.create_google_calendar_event', () => {
     expect(out.id).toBe('e1');
     const req = transport.requests[0]!;
     expect(req.method).toBe('POST');
-    // sendUpdates defaults to 'all' so attendees are actually emailed the invite.
     expect(req.url).toBe('https://www.googleapis.com/calendar/v3/calendars/primary/events?sendUpdates=all');
     const body = req.body as {
       summary: string;
@@ -131,7 +124,6 @@ describe('calendar.update_event', () => {
     const req = transport.requests[0]!;
     expect(req.method).toBe('PATCH');
     expect(req.body).toEqual({ summary: 'Renamed' });
-    // The update is emailed to attendees (default 'all').
     expect(req.url).toContain('sendUpdates=all');
   });
 
@@ -152,7 +144,6 @@ describe('calendar.delete_event', () => {
     const out = await deleteEvent.execute({ auth, http, props: { calendarId: 'primary', eventId: 'e1' } });
     expect(out).toEqual({ deleted: true, eventId: 'e1' });
     expect(transport.requests[0]!.method).toBe('DELETE');
-    // The cancellation is emailed to attendees (default 'all').
     expect(transport.requests[0]!.url).toContain('sendUpdates=all');
   });
 });

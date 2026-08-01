@@ -22,11 +22,7 @@ export const ADD_COMMENT_TYPE = 'asana.add_comment';
 /** The task fields requested back on reads/writes. */
 const TASK_FIELDS = 'name,notes,completed,due_on,due_at,assignee.name,permalink_url,projects.name';
 
-/**
- * Create a task. A task must live in either a `project` (picker) or a `workspace`
- * (picker) — supply at least one; when only a workspace is given the task lands in
- * that workspace's "My Tasks". `assignee` is a user gid or the literal `me`.
- */
+/** Create a task — at least one of `project` or `workspace` must be supplied. */
 export const createTask = defineAction({
   type: CREATE_TASK_TYPE,
   name: 'Create task',
@@ -71,10 +67,7 @@ export const getTask = defineAction({
   },
 });
 
-/**
- * Update a task. Only the supplied fields change (Asana PUT is a partial update),
- * so omitted props are left as they are. `completed` marks a task done or reopened.
- */
+/** Update a task; Asana's PUT is a partial update, so omitted props are left unchanged. */
 export const updateTask = defineAction({
   type: UPDATE_TASK_TYPE,
   name: 'Update task',

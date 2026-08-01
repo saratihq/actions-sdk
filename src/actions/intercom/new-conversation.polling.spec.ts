@@ -3,10 +3,7 @@ import { FakeTransport, stubAuth } from '../../testing/fakes';
 import { MemoryStore } from '../../testing/memory-store';
 import { newConversation } from './new-conversation.polling';
 
-/**
- * A conversations-search response — shape from Intercom's public search/list docs
- * (`conversations[]` with id/created_at/source, `pages` cursor).
- */
+/** A conversations-search response, in Intercom's public envelope shape. */
 function searchResponse(): NormalizedResponse {
   return {
     status: 200,

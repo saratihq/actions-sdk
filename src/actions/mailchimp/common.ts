@@ -2,24 +2,9 @@ import { createHash } from 'node:crypto';
 import type { BasicScheme } from '../../core/auth';
 import { shortText } from '../../core/props';
 
-/**
- * Shared Mailchimp (Marketing API) building blocks: the `/3.0` endpoints, the
- * datacenter-prefixed host, and the `merge_fields`/subscriber-hash conventions
- * are Mailchimp's public contract. JSON throughout, so writes work.
- *
- * Mailchimp is **region-scoped**: the host embeds a datacenter prefix (e.g.
- * `us19`) taken from the API-key suffix or the OAuth metadata endpoint. The
- * opaque auth handle can't carry it, so it rides as a required `serverPrefix`
- * prop — which means audience/list pickers are blocked until the loader contract
- * can pass set-prop values.
- */
+/** Shared Mailchimp Marketing API `/3.0` building blocks; the host is datacenter-scoped, so `serverPrefix` is a required prop. */
 
-/**
- * BYO Mailchimp API keys authenticate with HTTP Basic (any username + the key as
- * password); managed OAuth attaches a Bearer token server-side instead. Declared
- * `basic` for the direct transport; the managed transport attaches its own
- * credential.
- */
+/** HTTP Basic (any username + the API key) on the direct transport; managed attaches its own Bearer. */
 export const mailchimpAuth: BasicScheme = { type: 'basic' };
 
 /** Root a Marketing API call at the connection's datacenter. */

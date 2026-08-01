@@ -3,20 +3,12 @@ import { cursorInBody, paginate } from '../../core/http/pagination';
 import { number, shortText } from '../../core/props';
 import { DRIVE_FILE_FIELDS, DRIVE_FILES_URL, DRIVE_FOLDER_MIME, type DriveFile, driveAuth } from './common';
 
-/**
- * Public action type ids. The established catalog ids for these capabilities are
- * hyphenated (`drive.list-files`, `drive.get-file-or-folder-by-id`), which the
- * action namespace forbids, so these use underscore ids instead.
- */
+/** Public catalog ids — underscore form, since the action namespace forbids hyphens. */
 export const LIST_FILES_TYPE = 'drive.list_files';
 export const GET_FILE_TYPE = 'drive.get_file';
 export const CREATE_FOLDER_TYPE = 'drive.create_folder';
 
-/**
- * List or search Drive files. With no `query`, lists non-trashed files; otherwise
- * the raw Drive `q` is used as given (e.g. `name contains 'report' and trashed=false`),
- * following `nextPageToken` up to `limit`.
- */
+/** List or search Drive files; a `query` is passed through as a raw Drive `q`, paged to `limit`. */
 export const listFiles = defineAction({
   type: LIST_FILES_TYPE,
   name: 'List files',

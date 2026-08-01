@@ -3,14 +3,6 @@ import { ActionError } from './errors';
 import type { HttpClient } from './http/client';
 import type { JsonValue } from './http/types';
 
-/**
- * Typed prop schemas — the config surface the client renders and the runtime
- * validates. Each kind is a plain data object plus (for dropdowns) an async
- * `options` loader that turns "paste an ID" into a live-fetched picker. Value
- * types flow through generics so `props` inside
- * `run` is fully typed with no `any`.
- */
-
 export type PropKind =
   | 'shortText'
   | 'longText'
@@ -189,13 +181,7 @@ function schema<TKind extends PropKind, TValue, R extends boolean>(
 
 // ─── validation / coercion at the trust boundary ───
 
-/**
- * Validate and coerce a raw, untrusted input record (from a workflow node, an
- * API body, or an AI author) into the typed values `run` expects. Missing
- * required props and type-mismatches throw a non-retryable `invalid_input`
- * error naming the field — the boundary check a T4 public surface owes its
- * callers. Optional props fall back to their default or are omitted.
- */
+/** Validate/coerce untrusted input into typed props; throws non-retryable `invalid_input` naming the field. */
 export function parseProps<TProps extends PropsSchema>(
   schemas: TProps,
   input: Record<string, unknown>,
@@ -270,11 +256,7 @@ function invalidInput(field: string, message: string): ActionError {
   return new ActionError({ code: 'invalid_input', message, status: 0, retryable: false, detail: { field } });
 }
 
-/**
- * Resolve a dropdown/multiSelect prop's options — static array or live loader —
- * to a uniform {@link DropdownResult}. A missing connection yields a disabled
- * result (not an error), centralising the guard each option loader would otherwise repeat by hand.
- */
+/** Resolve a dropdown/multiSelect's options (static or live); a missing connection yields a disabled result, not an error. */
 export async function resolveOptions<V>(
   propSchema: DropdownSchema<V, boolean> | MultiSelectSchema<V, boolean>,
   ctx: Partial<OptionsContext> & { http?: HttpClient },

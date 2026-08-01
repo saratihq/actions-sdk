@@ -11,12 +11,7 @@ import {
   outlookAuth,
 } from './common';
 
-/**
- * Public action type ids. The established Outlook catalog ids are hyphenated
- * (`send-email`) or camelCase (`findEmail`), which the action namespace forbids,
- * so these use underscore ids. Microsoft Graph uses the standard bearer transport,
- * so these actions are transport-agnostic.
- */
+/** Public catalog ids — underscored, since the action namespace forbids hyphens and camelCase. */
 export const SEND_EMAIL_TYPE = 'outlook.send_email';
 export const LIST_MESSAGES_TYPE = 'outlook.list_messages';
 export const GET_MESSAGE_TYPE = 'outlook.get_message';
@@ -26,11 +21,7 @@ export interface OutlookSendResult {
   sent: true;
 }
 
-/**
- * Send an email from the connected mailbox. `to`/`cc`/`bcc` accept a
- * comma-separated address list. Graph returns 202 Accepted with no body →
- * synthesised confirmation.
- */
+/** Send an email; Graph answers 202 with no body, so the confirmation is synthesised. */
 export const sendEmail = defineAction({
   type: SEND_EMAIL_TYPE,
   name: 'Send email',
@@ -63,14 +54,7 @@ export const sendEmail = defineAction({
   },
 });
 
-/**
- * List messages, optionally within a folder and/or matching a free-text `search`,
- * following Graph's `@odata.nextLink` cursor up to `limit`. Graph returns messages
- * newest-first (`receivedDateTime` descending) by default, so no explicit
- * `$orderby` is sent — which also avoids URL-encoding a spaced OData value
- * (`+`-vs-`%20`) that Graph's parser might reject. `$search` additionally needs
- * the `ConsistencyLevel: eventual` header.
- */
+/** List messages (optionally by folder or `$search`), walking `@odata.nextLink` up to `limit`; Graph is newest-first by default, so no `$orderby` is sent. */
 export const listMessages = defineAction({
   type: LIST_MESSAGES_TYPE,
   name: 'List messages',

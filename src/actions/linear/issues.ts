@@ -58,12 +58,7 @@ function splitIds(value: string | undefined): string[] | undefined {
   return ids.length > 0 ? ids : undefined;
 }
 
-/**
- * Create an issue in a team. The **team picker is live** (independent of other
- * props), as is the assignee picker. State, label, and project pickers depend on
- * the chosen team, so they are id inputs until the loader contract can pass
- * set-prop values.
- */
+/** Create an issue in a team; state/label/project stay id inputs because they are team-scoped. */
 export const createIssue = defineAction({
   type: CREATE_ISSUE_TYPE,
   name: 'Create issue',
@@ -164,11 +159,7 @@ export const getIssue = defineAction({
   },
 });
 
-/**
- * List issues, optionally scoped to a team (live picker) or assignee, following
- * Linear's GraphQL `pageInfo.endCursor` connection cursor up to `limit`. The team
- * and assignee filter pickers are independent, so both are live.
- */
+/** List issues, optionally scoped to a team or assignee, following `pageInfo.endCursor` up to `limit`. */
 export const listIssues = defineAction({
   type: LIST_ISSUES_TYPE,
   name: 'List issues',

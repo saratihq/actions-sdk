@@ -7,12 +7,6 @@ import type {
   Transport,
 } from '../core/http/types';
 
-/**
- * Test doubles. Internal (imported by specs directly, not via the barrel) so
- * unit tests can drive the client/transports without a network. Live tests use
- * the real direct transport against a provider's public API instead.
- */
-
 /** A {@link Transport} that replays a handler, recording every request it saw. */
 export class FakeTransport implements Transport {
   readonly kind = 'fake';

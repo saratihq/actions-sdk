@@ -25,10 +25,7 @@ interface JiraCommentPage {
   maxResults: number;
 }
 
-/**
- * Add a comment to an issue. Plain text is shaped into ADF for you; set
- * `isAdf` to pass a raw ADF document as JSON instead (advanced).
- */
+/** Add a comment; plain text is shaped into ADF unless `isAdf` marks it a raw ADF document. */
 export const addComment = defineAction({
   type: ADD_COMMENT_TYPE,
   name: 'Add comment',

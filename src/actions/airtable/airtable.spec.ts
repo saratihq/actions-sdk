@@ -4,12 +4,7 @@ import { FakeTransport, stubAuth } from '../../testing/fakes';
 import { listBases } from './bases';
 import { createRecord, deleteRecord, getRecord, listRecords, updateRecord } from './records';
 
-/**
- * Golden offline tests for the Airtable actions. A {@link FakeTransport} replays
- * canned Airtable responses and records the request, so the tests assert URL +
- * body shaping (including offset pagination and the live base picker) without a
- * connection.
- */
+/** Golden offline tests for the Airtable actions, driven by a {@link FakeTransport}. */
 function fake(handler: (req: NormalizedRequest, i: number) => NormalizedResponse) {
   const transport = new FakeTransport(handler);
   return { auth: stubAuth(transport, 'apiKey'), http: new HttpClient(), transport };

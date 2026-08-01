@@ -22,11 +22,7 @@ function issue(id: string, key: string, summary: string) {
   };
 }
 
-/**
- * A BYO/basic transport: `accessible-resources` is OAuth-only so it 401s
- * (→ resolveJiraBase falls back to the instance URL), and `/search/jql` answers
- * with the given issues.
- */
+/** A BYO/basic transport: `accessible-resources` 401s (→ fall back to the instance URL); `/search/jql` answers. */
 function jiraTransport(issues: unknown[]): FakeTransport {
   return new FakeTransport((req: NormalizedRequest): NormalizedResponse => {
     if (req.url.includes('accessible-resources'))

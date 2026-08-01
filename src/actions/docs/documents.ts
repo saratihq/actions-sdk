@@ -50,10 +50,7 @@ export interface AppendTextResult {
   documentId: string;
 }
 
-/**
- * Append text to the end of a document. Uses a single `insertText` request at the
- * document's end-of-segment location, so the caller never computes an index.
- */
+/** Append text via one `insertText` at the end-of-segment location, so the caller never computes an index. */
 export const appendText = defineAction({
   type: APPEND_TEXT_TYPE,
   name: 'Append text',

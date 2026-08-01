@@ -4,10 +4,7 @@ import { type LinearTeam, linearAuth, listLinearTeams } from './common';
 /** Public type — a stable public catalog id. */
 export const LIST_TEAMS_TYPE = 'linear.list_teams';
 
-/**
- * List every team in the workspace. Read-only; it also underpins the team picker
- * used by the issue actions.
- */
+/** List every team in the workspace; also underpins the team picker on the issue actions. */
 export const listTeams = defineAction({
   type: LIST_TEAMS_TYPE,
   name: 'List teams',

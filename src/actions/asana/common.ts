@@ -2,21 +2,11 @@ import type { AuthHandle, OAuth2Scheme } from '../../core/auth';
 import type { HttpClient } from '../../core/http/client';
 import { dropdown, type DropdownOption, type DropdownSchema } from '../../core/props';
 
-/**
- * Shared Asana (API v1) building blocks: the `/api/1.0` REST endpoints, the
- * `{ data: … }` request/response envelope, OAuth2 Bearer auth, and the
- * `projects`/`stories` resource shapes are Asana's public contract. Everything is
- * JSON, so every action runs on both transports (a managed proxy, or a BYO
- * personal access token) with identical code.
- */
+/** Shared Asana (API v1) building blocks: `/api/1.0` endpoints and the `{ data: … }` envelope. */
 
 export const ASANA_API_BASE = 'https://app.asana.com/api/1.0';
 
-/**
- * Asana authenticates with an OAuth2 bearer access token (managed) or a personal
- * access token attached the same way (BYO), so it is declared as `oauth2` — the
- * transport attaches the bearer either way and the action code is identical.
- */
+/** OAuth2 token (managed) or a PAT (BYO) — both ride the same bearer, so one scheme serves both. */
 export const asanaAuth: OAuth2Scheme = {
   type: 'oauth2',
   scopes: ['default'],
@@ -65,12 +55,7 @@ export async function listAsanaWorkspaces(http: HttpClient, auth: AuthHandle): P
   return res.data.data ?? [];
 }
 
-/**
- * Resolve a usable workspace gid: the caller's explicit choice, else the first
- * workspace on the account. Asana's `/projects` (and most list endpoints) reject
- * a call with no `workspace`/`team` scope (HTTP 400), so every project read must
- * carry one — and most accounts have exactly one workspace, so defaulting is safe.
- */
+/** Resolve a workspace gid (explicit, else the first) — Asana list endpoints 400 without one. */
 export async function resolveWorkspaceGid(
   http: HttpClient,
   auth: AuthHandle,
@@ -81,11 +66,7 @@ export async function resolveWorkspaceGid(
   return workspaces[0]?.gid;
 }
 
-/**
- * Fetch projects in a workspace — shared by the list read and the project picker.
- * Asana requires the `workspace` scope; when the caller doesn't pass one we fall
- * back to the first workspace (see {@link resolveWorkspaceGid}).
- */
+/** Fetch projects in a workspace, defaulting the workspace via {@link resolveWorkspaceGid}. */
 export async function listAsanaProjects(
   http: HttpClient,
   auth: AuthHandle,
@@ -100,7 +81,7 @@ export async function listAsanaProjects(
   return res.data.data ?? [];
 }
 
-/** Live workspace picker — independent of any other prop, so it works under today's loader contract. */
+/** Live workspace picker — must stay independent of other props, per the loader contract. */
 export async function workspaceOptions(
   http: HttpClient,
   auth: AuthHandle,

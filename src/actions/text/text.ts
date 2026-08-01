@@ -7,15 +7,6 @@ import { ActionError } from '../../core/errors';
 import type { JsonValue } from '../../core/http/types';
 import { checkbox, dropdown, json, longText, number, shortText } from '../../core/props';
 
-/**
- * Text utilities — no-auth (`none` scheme) actions. The core string
- * transforms are dependency-free; the HTML/Markdown trio uses small permissive
- * libraries (`showdown` MIT, `turndown` MIT, `node-html-parser` MIT). Type names
- * the SDK namespace forbids (`stripHtml`, `defaultValue`) are re-spelled
- * snake_case; `markdown_to_html`, `html_to_markdown` and `extract_from_html`
- * already match snake_case.
- */
-
 type MarkdownFlavor = 'github' | 'original' | 'vanilla';
 type ExtractTarget = 'title' | 'links' | 'images' | 'headings' | 'paragraphs' | 'custom';
 type ExtractionType = 'textContent' | 'innerHtml' | 'outerHtml' | 'attribute';
@@ -45,8 +36,7 @@ export const concat = defineAction({
     texts: json({ label: 'Texts', description: 'A JSON array of values to join.', required: true }),
     separator: shortText({ label: 'Separator', required: false, defaultValue: '' }),
   },
-  // Returns the joined string DIRECTLY (not `{ result }`): the output is the bare
-  // concatenated string, so wrapping it in an object would change that contract.
+  // Output contract: the bare joined string, never a `{ result }` wrapper.
   run: ({ props }): Promise<string> => {
     if (!Array.isArray(props.texts)) {
       throw new ActionError({

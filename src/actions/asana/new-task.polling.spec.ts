@@ -61,11 +61,8 @@ describe('asana.new_task polling trigger', () => {
     const store = new MemoryStore();
     const { transport, events } = await poll(store, [TASK_A, TASK_B]);
 
-    // No pre-existing task fires on enablement...
     expect(events).toEqual([]);
-    // ...and the first poll doesn't even hit /tasks — the watermark is all it needs.
     expect(transport.requests.some((r) => r.url.includes('/tasks'))).toBe(false);
-    // The runtime persisted the watermark, so the next poll can window on it.
     expect(await store.get<string>('lastPolledAt')).toBeTruthy();
   });
 
@@ -73,12 +70,10 @@ describe('asana.new_task polling trigger', () => {
     const store = new MemoryStore();
     await poll(store, [TASK_A]); // baseline
 
-    // Second poll: watermark exists → tasks changed since fire.
     const second = await poll(store, [TASK_A, TASK_B]);
     expect(second.events.map((t) => t.gid)).toEqual([TASK_A.gid, TASK_B.gid]);
 
-    // Third poll: TASK_A is windowed back in (edited after firing) but its gid is
-    // already seen — only the genuinely-new TASK_C fires.
+    // TASK_A is windowed back in (edited after firing) but its gid is already seen.
     const third = await poll(store, [TASK_C, TASK_A]);
     expect(third.events.map((t) => t.gid)).toEqual([TASK_C.gid]);
   });
@@ -98,7 +93,6 @@ describe('asana.new_task polling trigger', () => {
 
     const modifiedSince = params.get('modified_since');
     expect(modifiedSince).toBe(watermark);
-    // The value the provider receives is a valid ISO 8601 instant.
     expect(new Date(modifiedSince!).toISOString()).toBe(modifiedSince);
   });
 });

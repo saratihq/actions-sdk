@@ -33,17 +33,8 @@ interface SlackEventEnvelope {
 }
 
 /**
- * A webhook trigger exercising the trigger contract: verification handshake,
- * signature check, payload → normalised events, and retry dedup. Slack's Events
- * subscription URL is configured at the app level, so there is no per-connection
- * registration API — `onEnable/onDisable` are intentionally omitted.
- *
- * As an app-level webhook (Slack Events), it needs an app-level intake
- * (url_verification handshake + app-level signing secret + event→workflow
- * routing) the host runtime does not yet provide. It is therefore excluded from
- * the shipped catalog (`catalogTriggers` in src/actions/index.ts) until that
- * intake exists; this definition is kept ready (and stays in `referenceTriggers`
- * for example and live tests).
+ * Webhook trigger over Slack Events; the app-level subscription URL means no per-connection
+ * registration, and this stays out of `catalogTriggers` until the host provides app-level intake.
  */
 export const newMessage = defineTrigger({
   type: NEW_MESSAGE_TYPE,

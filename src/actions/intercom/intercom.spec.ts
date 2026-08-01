@@ -4,12 +4,7 @@ import { FakeTransport, stubAuth } from '../../testing/fakes';
 import { createContact, listContacts, searchContacts } from './contacts';
 import { listAdmins } from './other';
 
-/**
- * Golden offline tests for the Intercom actions. A {@link FakeTransport} replays
- * canned REST envelopes and records requests, so the tests assert the version
- * header, cursor pagination, the search DSL body, and the live admin picker
- * without a connection.
- */
+/** Offline harness: a {@link FakeTransport} replays canned REST envelopes and records requests. */
 function fake(handler: (req: NormalizedRequest, i: number) => NormalizedResponse) {
   const transport = new FakeTransport(handler);
   return { auth: stubAuth(transport, 'apiKey'), http: new HttpClient(), transport };

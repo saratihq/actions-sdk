@@ -6,12 +6,8 @@ import type { JsonValue } from '../../core/http/types';
 import { checkbox, dropdown, file, json, longText, shortText } from '../../core/props';
 
 /**
- * CSV utilities — no-auth (`none` scheme) actions. The CSV↔JSON transforms
- * are a dependency-free RFC-4180 parser/serialiser; `convert_excel_to_csv` reads
- * a workbook with `exceljs` (MIT). The maintained MIT `exceljs` is used (rather
- * than the frozen `xlsx@0.18.5`, Apache-2.0 but shipped with unpatched CVEs) — it
- * reads modern `.xlsx`/`.xlsm`, so legacy binary `.xls` (OLE2) is rejected with a
- * clear message rather than mis-parsed.
+ * CSV utilities — no-auth actions: a dependency-free RFC-4180 parser/serialiser plus `exceljs`.
+ * Keep `exceljs`, not `xlsx@0.18.5` (frozen, unpatched CVEs); legacy binary `.xls` is rejected.
  */
 
 /** Parse CSV text into a matrix of string cells (RFC-4180 quoting rules). */

@@ -4,13 +4,7 @@ import { defineAction } from '../../core/action';
 import { ActionError } from '../../core/errors';
 import { number } from '../../core/props';
 
-/**
- * Math utilities — no-auth (`none` scheme) actions. Pure functions: they
- * compute from their props and never touch `http`/`auth`, so they run offline.
- * Type strings use the `<op>_math` names where valid in the SDK namespace
- * (`addition_math`, …); `generateRandom_math` is re-spelled `generate_random_math`
- * (the SDK namespace forbids the camel-case form).
- */
+/** Math utilities — pure no-auth actions; type ids are snake_case `<op>_math` (the namespace rejects camel-case). */
 
 /** The single-value result every arithmetic op returns. */
 export interface MathResult {

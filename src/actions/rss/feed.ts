@@ -1,10 +1,4 @@
-/**
- * A compact, dependency-free RSS/Atom item extractor. It is deliberately NOT a
- * general XML parser — it targets the well-defined `<item>`/`<entry>` shapes real
- * feeds emit, which is all the polling trigger needs. CDATA sections and the
- * common named/numeric entities are decoded; everything else is passed through
- * verbatim.
- */
+/** A dependency-free RSS/Atom item extractor — targets `<item>`/`<entry>` blocks only, not general XML. */
 
 export interface FeedItem {
   title: string;
@@ -49,11 +43,7 @@ function extractLink(block: string): string {
   return firstTag(block, 'link') ?? '';
 }
 
-/**
- * Parse the items of an RSS or Atom feed into a normalised shape. Items keep
- * their source order (newest-first for most feeds); the polling framework dedupes
- * by {@link FeedItem.id}.
- */
+/** Parse an RSS/Atom feed into normalised items, in source order. */
 export function parseFeed(xml: string): FeedItem[] {
   const items: FeedItem[] = [];
   const blocks = xml.matchAll(/<(item|entry)\b[\s\S]*?<\/\1>/gi);

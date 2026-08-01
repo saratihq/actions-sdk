@@ -5,18 +5,6 @@ import { HttpClient } from './http/client';
 import type { JsonValue } from './http/types';
 import { parseProps, type PropsSchema, type PropsValue } from './props';
 
-/**
- * Triggers — the second core primitive. Two strategies share one
- * contract surface:
- *  - polling: the runtime calls `poll` on a schedule; the SDK dedupes by a
- *    stable key and tracks the last-polled watermark in a {@link TriggerStore}.
- *  - webhook: the provider calls in; the SDK answers verification handshakes,
- *    checks signatures, and transforms the payload into normalised events.
- *
- * Both keep the action-facing seam identical to actions (auth handle + http),
- * so a provider's transport choice never leaks into trigger code.
- */
-
 /** Minimal durable KV the runtime provides for dedup + cursor/watermark state. */
 export interface TriggerStore {
   get<T = unknown>(key: string): Promise<T | undefined>;
@@ -94,14 +82,7 @@ export interface HandshakeResponse {
   body?: JsonValue;
 }
 
-/**
- * The durable handle {@link WebhookTriggerDefinition.onEnable} returns after
- * registering a subscription with the provider. `subscriptionId` is the
- * provider's id for the thing to delete on disable (a GitHub hook id, a Stripe
- * webhook-endpoint id, …). It must be JSON-serialisable end-to-end: the runtime
- * persists it verbatim and hands it back to {@link WebhookTriggerDefinition.onDisable}.
- * Extra provider-specific fields are allowed (they ride along in the handle).
- */
+/** Durable, JSON-serialisable handle from `onEnable`; `subscriptionId` is what `onDisable` deletes. */
 export interface WebhookRegistration {
   subscriptionId: string;
   [key: string]: JsonValue;
@@ -114,30 +95,15 @@ export interface WebhookContext<TProps extends PropsSchema> {
   store: TriggerStore;
   /** The public URL the provider should call — passed to registration. */
   webhookUrl: string;
-  /**
-   * The per-trigger signing secret the runtime generated. `onEnable` registers
-   * the subscription with it so the provider signs deliveries; `verify` checks
-   * inbound signatures against the same value (passed in the `verify` secrets
-   * bag). Empty string for app-level webhooks that carry no per-trigger secret.
-   */
+  /** Per-trigger signing secret shared by `onEnable` and `verify`; empty for app-level webhooks. */
   secret: string;
 }
 
 export interface WebhookTriggerDefinition<TProps extends PropsSchema, TItem> extends TriggerBase<TProps> {
   strategy: 'webhook';
-  /**
-   * Register a subscription with the provider pointing at `ctx.webhookUrl`,
-   * signed with `ctx.secret`, and return a {@link WebhookRegistration} the
-   * runtime persists. Omit for app-level webhooks whose subscription URL is
-   * configured out of band (e.g. Slack Events) — nothing to register per
-   * connection, nothing to hand back on disable.
-   */
+  /** Register a subscription at `ctx.webhookUrl` signed with `ctx.secret`; omit for app-level webhooks. */
   onEnable?(ctx: WebhookContext<TProps>): Promise<WebhookRegistration | void>;
-  /**
-   * Remove the subscription {@link onEnable} created. `registration` is the
-   * exact handle `onEnable` returned (undefined only if enable never produced
-   * one, or the runtime lost it) — delete by `subscriptionId`.
-   */
+  /** Remove the subscription `onEnable` created, by `registration.subscriptionId`. */
   onDisable?(ctx: WebhookContext<TProps> & { registration?: WebhookRegistration }): Promise<void>;
   /** Echo a provider verification challenge (Slack `url_verification`). Return null to ignore. */
   handshake?(request: WebhookRequest): HandshakeResponse | null;

@@ -1,12 +1,4 @@
-/**
- * The tool-aware model-call contract.
- *
- * These shapes let an agent loop hand its running conversation buffer to
- * {@link callAgentModel} and read back a normalized `{ text | toolCalls[] } +
- * usage` turn with zero adapter glue. The SDK owns the per-provider wire format;
- * the loop owns the durability. Nothing here reads a credential — the call rides
- * the opaque {@link AuthHandle} transport, same as every other action.
- */
+/** The tool-aware model-call contract: conversation buffer in, normalized turn + usage out. */
 
 /** The provider families the agent's model call supports. */
 export type AgentProvider = 'openai' | 'claude' | 'gemini' | 'mistral';
@@ -16,10 +8,7 @@ export type JsonSchema = Record<string, unknown>;
 
 /** A tool invocation the model requested — normalized across providers. */
 export interface AgentToolCall {
-  /**
-   * Call id that threads the result back to this call in the next turn. Real for
-   * OpenAI/Anthropic/Mistral; synthesized for Gemini (which matches by name).
-   */
+  /** Call id threading the result back next turn; synthesized for Gemini (which matches by name). */
   id: string;
   /** The tool name the model chose — resolved against the agent's bound tools. */
   name: string;
@@ -34,11 +23,7 @@ export interface AgentToolSchema {
   parameters: JsonSchema;
 }
 
-/**
- * One message in the running conversation buffer. `system` is NOT a buffer
- * message — it is passed alongside (the request's `system` field). The buffer
- * holds only `user` / `assistant` / `tool` turns.
- */
+/** One buffer message; `system` is not a buffer message — it rides the request's own `system` field. */
 export interface AgentConversationMessage {
   role: 'user' | 'assistant' | 'tool';
   /** Free-form text: the user prompt, the model's prose, or a tool result rendered for the model. */
@@ -56,10 +41,7 @@ export interface AgentUsage {
   totalTokens?: number;
 }
 
-/**
- * One normalized model turn: prose text and/or the tools it wants called. An
- * empty `toolCalls` is the natural final answer (the loop returns `text`).
- */
+/** One normalized model turn; an empty `toolCalls` is the final answer. */
 export interface AgentModelResult {
   text?: string;
   toolCalls: AgentToolCall[];
@@ -75,16 +57,11 @@ export interface AgentModelRequest {
   messages: AgentConversationMessage[];
   tools: AgentToolSchema[];
   temperature?: number;
-  /** Upper bound on generated tokens. Anthropic requires it, so it defaults to an agent-sized 4096 there. */
+  /** Upper bound on generated tokens; Anthropic requires it and defaults to 4096. */
   maxTokens?: number;
 }
 
-/**
- * One provider's wire adapter: build the URL + body, and parse the response into
- * the normalized {@link AgentModelResult}. Auth is intentionally absent — the
- * transport pulled from the {@link AuthHandle} injects the credential, so an
- * adapter is a pure request/response shaping function, unit-testable offline.
- */
+/** One provider's wire adapter: build URL + body, parse into {@link AgentModelResult}; auth-free by design. */
 export interface AgentModelAdapter {
   buildUrl(req: AgentModelRequest): string;
   /** Non-secret headers this provider requires (e.g. `anthropic-version`). */

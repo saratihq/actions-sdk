@@ -10,25 +10,14 @@ import {
   listFolderPaged,
 } from './common';
 
-/**
- * Public types — aligned to the catalog ids where one exists so the host runtime's
- * dedup replaces the prior row with this one and any plan referencing the
- * established id routes to this action. The prior `list_dropbox_folder`,
- * `create_new_dropbox_folder`, `search_dropbox`, and `get_dropbox_file_link`
- * ids are already underscore ids → reused verbatim. `get_metadata` has no prior
- * equivalent → a new underscore id.
- */
+/** Public catalog ids — stable; existing plans reference them verbatim. */
 export const LIST_FOLDER_TYPE = 'dropbox.list_dropbox_folder';
 export const GET_METADATA_TYPE = 'dropbox.get_file_metadata';
 export const CREATE_FOLDER_TYPE = 'dropbox.create_new_dropbox_folder';
 export const SEARCH_TYPE = 'dropbox.search_dropbox';
 export const GET_TEMPORARY_LINK_TYPE = 'dropbox.get_dropbox_file_link';
 
-/**
- * List the contents of a folder. Dropbox addresses the root as an empty path
- * (`""`); a sub-folder is a leading-slash path like `/Documents`. Follows
- * Dropbox's cursor pagination up to `limit`.
- */
+/** List a folder's contents; Dropbox addresses the root as the EMPTY path, sub-folders as `/Name`. */
 export const listFolder = defineAction({
   type: LIST_FOLDER_TYPE,
   name: 'List a folder',
@@ -109,10 +98,7 @@ export const createFolder = defineAction({
   },
 });
 
-/**
- * Search files and folders by name/content. Scoped to `path` (the whole account
- * when blank) and capped at `max` matches (Dropbox allows up to 1000 per page).
- */
+/** Search files and folders by name/content, scoped to `path` (the whole account when blank). */
 export const search = defineAction({
   type: SEARCH_TYPE,
   name: 'Search',
@@ -141,11 +127,7 @@ export const search = defineAction({
   },
 });
 
-/**
- * Get a short-lived (≈4h) direct download URL for a file. This is the
- * managed-safe way to hand a caller a file's contents without moving bytes over
- * the JSON-only proxy (see common.ts) — the link can be fetched directly.
- */
+/** Get a short-lived (~4h) download URL — the managed-safe way to reach file contents over a JSON-only proxy. */
 export const getTemporaryLink = defineAction({
   type: GET_TEMPORARY_LINK_TYPE,
   name: 'Get temporary file link',

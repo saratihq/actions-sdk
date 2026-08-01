@@ -9,21 +9,7 @@ import {
   todoistNextPage,
 } from './common';
 
-/**
- * Polling trigger (`todoist.new_task`) — fires for each new active task.
- *
- * WHY POLLING (not a registered webhook): Todoist webhooks are configured **at the
- * app level** in the Developer Console — one URL per OAuth app, signed by the
- * app's single `client_secret` and firing for every user who authorised the app.
- * There is no public API to register a webhook with a per-connection URL or a
- * per-connection secret, so the register/verify-per-connection shape the SDK
- * webhook transport needs doesn't exist. Docs: https://developer.todoist.com/sync/v9/
- * (Webhooks). Polling works identically on both the managed and BYO transports.
- *
- * The poll lists active tasks (optionally scoped to a project); the SDK's
- * `runPoll` dedupes by task id, so a re-poll emits only tasks not seen before.
- */
-
+/** Polling trigger (`todoist.new_task`) — fires for each new active task; Todoist has no per-connection webhook to register. */
 export const NEW_TASK_TYPE = 'todoist.new_task';
 
 /** Cap the per-poll walk so a huge task list can't fetch unbounded pages each tick. */

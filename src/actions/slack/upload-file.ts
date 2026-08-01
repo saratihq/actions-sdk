@@ -16,16 +16,8 @@ export interface CompleteUploadResponse extends SlackEnvelope {
 }
 
 /**
- * UPLOAD a file to a Slack channel (the second half of the file flow), via
- * Slack's current external-upload flow:
- *   1. `files.getUploadURLExternal` → a one-time upload URL + file id;
- *   2. a **multipart/form-data POST** of the bytes to that URL — the upload;
- *   3. `files.completeUploadExternal` → attach the file to the channel.
- *
- * Step 2 is the multipart upload: it carries the raw bytes, so it needs a direct
- * (bring-your-own) connection — a managed connection fails loudly here (the
- * proxy is JSON-only). The `file` prop is what a `slack.get_file` (or any
- * upstream file-producing) step feeds in via `{{step.file}}`.
+ * Upload a file to a Slack channel: reserve an upload URL, POST the bytes, complete the upload.
+ * The multipart step carries raw bytes, so this needs a direct connection — the JSON-only managed proxy fails.
  */
 export const uploadFile = defineAction({
   type: UPLOAD_FILE_TYPE,

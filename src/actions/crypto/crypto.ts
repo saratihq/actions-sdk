@@ -4,11 +4,7 @@ import { defineAction } from '../../core/action';
 import { ActionError } from '../../core/errors';
 import { checkbox, dropdown, longText, number, shortText } from '../../core/props';
 
-/**
- * Crypto utilities — no-auth (`none` scheme) actions. Backed entirely by
- * Node's built-in `node:crypto`, so they stay dependency-free and run offline.
- * Type names are snake_case for the SDK namespace (which forbids hyphens).
- */
+/** Crypto utilities — no-auth actions on `node:crypto`; type names are snake_case (the namespace bans hyphens). */
 
 type TextEncoding = 'hex' | 'base64';
 

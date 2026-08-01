@@ -5,13 +5,6 @@ import { toRows } from './common';
 import { listSheets } from './tabs';
 import { clearSheet, insertRow, readRange, updateRow } from './values';
 
-/**
- * Golden offline tests for the Google Sheets actions. A {@link FakeTransport}
- * replays canned API v4 responses and records the request, asserting the values
- * endpoints (append/read/update/clear), the A1 `range` encoding, and the live
- * spreadsheet picker without a connection. (See sheets.live.spec.ts for the live
- * smoke tests.)
- */
 function fake(handler: (req: NormalizedRequest, i: number) => NormalizedResponse) {
   const transport = new FakeTransport(handler);
   return { auth: stubAuth(transport, 'oauth2'), http: new HttpClient(), transport };

@@ -2,19 +2,7 @@ import type { OAuth2Scheme } from '../../core/auth';
 import type { NextPageFn } from '../../core/http/pagination';
 import type { JsonValue } from '../../core/http/types';
 
-/**
- * Shared Outlook (Microsoft Graph v1.0) building blocks: the `/me/messages`,
- * `/me/mailFolders`, and `/me/sendMail` endpoints, the `@odata.nextLink` cursor,
- * and the `{ message: { body, toRecipients } }` send shape from Microsoft Graph's
- * public API.
- *
- * Auth shape: Microsoft Graph authenticates with a standard
- * `Authorization: Bearer <token>` over HTTPS — the same shape as every other
- * oauth2 app in this SDK. The actions never set the header; the transport does.
- * Over the managed transport the proxy strips the (absent) auth header and
- * injects the connection's real Graph token server-side, keyed by the managed
- * connection reference — identical handling to Google/Slack.
- */
+/** Shared Outlook (Microsoft Graph v1.0) building blocks: `/me` endpoints, the `@odata.nextLink` cursor, send shape. */
 
 export const GRAPH_ME_BASE = 'https://graph.microsoft.com/v1.0/me';
 
@@ -66,21 +54,13 @@ export interface OutlookMailFolder {
 export const MESSAGE_SELECT =
   'id,subject,bodyPreview,from,toRecipients,ccRecipients,receivedDateTime,sentDateTime,isRead,hasAttachments,webLink,conversationId';
 
-/**
- * `@odata.nextLink` pagination (Microsoft Graph): the body carries a fully-formed
- * absolute URL for the next page, or nothing on the last page. Returned verbatim,
- * like a Link-header `next`.
- */
+/** Graph pagination: `@odata.nextLink` is a fully-formed absolute URL, returned verbatim. */
 export const odataNextLink: NextPageFn = (response) => {
   const next = (response.data as { ['@odata.nextLink']?: unknown })['@odata.nextLink'];
   return typeof next === 'string' && next.length > 0 ? next : null;
 };
 
-/**
- * Parse a comma/semicolon-separated address list into Graph's recipient shape.
- * Empty entries are dropped; a blank input yields an empty array (the caller
- * decides whether that field is required).
- */
+/** Parse a comma/semicolon-separated address list into Graph's recipient shape; blank yields `[]`. */
 export function toRecipients(csv: string | undefined): Array<{ emailAddress: { address: string } }> {
   if (!csv) return [];
   return csv

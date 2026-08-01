@@ -11,32 +11,16 @@ import type {
 } from './types';
 
 /**
- * Gemini `:generateContent` function calling — the classic REST shape the LLM
- * `generate_text` action already targets (contents/parts + `?key=` auth). Tools
- * are `{ functionDeclarations:[…] }`; the model's calls come back as `functionCall`
- * parts (role `model`); results go back as `functionResponse` parts in a user turn.
- * Gemini matches result→call by NAME, but its API also carries an OPTIONAL `id` on
- * `functionCall`/`functionResponse` — the ONLY way to disambiguate two concurrent
- * calls to the SAME function, whose names collide. The adapter preserves that `id` when the
- * model sends one (threading it back on both the echoed `functionCall` and the
- * `functionResponse`), and synthesize a stable `name_index` only when it is absent.
- * Verified against the generateContent function-calling reference (ai.google.dev/api).
+ * Gemini `:generateContent` function calling — results thread by NAME, with an optional per-call `id`
+ * that is the only way to disambiguate concurrent calls to the same function.
  */
 
-/** Gemini omits the per-call id on older responses — synthesize a stable one so the loop always has an id. */
+/** Gemini omits the per-call id on older responses — synthesize a stable one. */
 function synthesizeId(name: string, index: number): string {
   return `${name}_${index}`;
 }
 
-/**
- * The keys Gemini's function-declaration `parameters` accepts — its `Schema` is an
- * OpenAPI-3.0 SUBSET, NOT full JSON Schema, and v1beta strict parsing 400s on any
- * unknown key ("Unknown name additionalProperties"). It uses an allowlist rather than a
- * denylist so no JSON-Schema-only keyword (`additionalProperties`, `$schema`, `$defs`,
- * `oneOf`, `additionalItems`, …) can ever slip through: an unlisted key only loosens
- * the schema, never breaks the call. Verified against the generateContent Schema
- * reference (ai.google.dev/api/caching#Schema).
- */
+/** Gemini's `Schema` is an OpenAPI-3.0 subset and v1beta 400s on any unknown key — allowlist, never a denylist. */
 const GEMINI_SCHEMA_KEYS = new Set([
   'type',
   'format',
@@ -62,12 +46,7 @@ const GEMINI_SCHEMA_KEYS = new Set([
   'anyOf',
 ]);
 
-/**
- * Recursively coerce ANY tool JSON schema into a Gemini-safe `Schema`: keep only the
- * allowlisted keys, recursing into `properties.*`, `items`, and `anyOf` (the nested
- * schema positions). A non-object node (string enum, number, array of `required`)
- * passes through untouched — only object nodes are filtered.
- */
+/** Recursively coerce any tool JSON schema into a Gemini-safe `Schema`, keeping only allowlisted keys. */
 function sanitizeGeminiSchema(schema: unknown): JsonValue {
   if (Array.isArray(schema)) return schema.map(sanitizeGeminiSchema);
   if (schema === null || typeof schema !== 'object') return schema as JsonValue;
@@ -89,12 +68,7 @@ function sanitizeGeminiSchema(schema: unknown): JsonValue {
   return out;
 }
 
-/**
- * True when a sanitized schema declares no parameters (an object type — or untyped —
- * with no properties). Gemini rejects a function declaration whose `parameters` is an
- * empty-properties object, so such a tool is emitted as a no-parameter function (the
- * `parameters` field omitted). This is the fate of the open/default tool schema.
- */
+/** True when a sanitized schema declares no parameters — Gemini rejects an empty-properties `parameters`. */
 function isNoParamSchema(schema: JsonValue): boolean {
   if (schema === null || typeof schema !== 'object' || Array.isArray(schema)) return false;
   const props = schema.properties;
@@ -113,13 +87,7 @@ function functionDeclaration(tool: AgentToolSchema): JsonValue {
   };
 }
 
-/**
- * Ids Gemini itself issued — a `functionCall` that carried a real `id`, as opposed
- * to the synthesized `name_index` fallback. Reconstructed by replaying the same
- * indexing {@link parseResponse} used: a call whose stored id differs from what
- * `synthesizeId` would produce for its position was threaded from a real Gemini id,
- * so it must round-trip on the wire to disambiguate same-name concurrent calls.
- */
+/** Ids Gemini itself issued — recovered by replaying {@link parseResponse}'s indexing; these must round-trip. */
 function geminiRealCallIds(messages: readonly AgentConversationMessage[]): Set<string> {
   const real = new Set<string>();
   for (const message of messages) {
@@ -166,8 +134,7 @@ function geminiContents(messages: readonly AgentConversationMessage[]): JsonValu
         name: names.get(id) ?? id,
         response: { result: message.content },
       };
-      // Only a real Gemini-issued id disambiguates same-name calls; a synthesized
-      // id was never seen by Gemini, so emitting it would be meaningless.
+      // Only a real Gemini-issued id disambiguates same-name calls; a synthesized one is meaningless here.
       if (realIds.has(id)) functionResponse.id = id;
       pendingResponses.push({ functionResponse });
       continue;
@@ -186,8 +153,7 @@ function buildBody(req: AgentModelRequest): JsonValue {
   if (req.maxTokens !== undefined) generationConfig.maxOutputTokens = req.maxTokens;
   return {
     contents: geminiContents(req.messages),
-    // A zero-tool request omits `tools` entirely — Gemini 400s on an empty
-    // `functionDeclarations` (a tools-less "just reason" agent is valid; §2).
+    // Omit `tools` entirely when empty — Gemini 400s on an empty `functionDeclarations`.
     ...(req.tools.length > 0
       ? { tools: [{ functionDeclarations: req.tools.map(functionDeclaration) }] }
       : {}),
@@ -205,8 +171,7 @@ function parseResponse(data: unknown): AgentModelResult {
     const part = asRecord(raw);
     const fnCall = asRecord(part?.functionCall);
     if (fnCall && typeof fnCall.name === 'string') {
-      // Prefer the real id Gemini sends (parallel same-function disambiguation);
-      // fall back to a synthesized name_index ONLY when the call carried none.
+      // Prefer the real id Gemini sends; synthesize only when the call carried none.
       const realId = typeof fnCall.id === 'string' && fnCall.id.length > 0 ? fnCall.id : undefined;
       toolCalls.push({
         id: realId ?? synthesizeId(fnCall.name, toolCalls.length),

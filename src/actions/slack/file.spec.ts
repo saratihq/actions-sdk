@@ -6,12 +6,6 @@ import { slackOAuth } from './common';
 import { getFile } from './get-file';
 import { uploadFile } from './upload-file';
 
-/**
- * The Slack file actions over the DIRECT transport (the only transport files
- * ride). A route table drives an injected fetch so the two-/three-hop flows are
- * exercised deterministically — no network — covering the binary-download decode
- * and the multipart-upload body shape.
- */
 function directAuth(routes: (url: string, init: Parameters<FetchLike>[1]) => FetchLikeResponse) {
   const calls: Array<{ url: string; init: Parameters<FetchLike>[1] }> = [];
   const fetchImpl: FetchLike = (input, init) => {

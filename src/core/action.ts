@@ -44,11 +44,7 @@ export interface Action<TProps extends PropsSchema, TOutput> extends ActionDefin
   toManifest(): ManifestEntry;
 }
 
-/**
- * Define an action. Validates the public namespace at definition time (a
- * malformed `type` is a build-time bug, not a runtime surprise) and wires the
- * `execute`/`loadOptions`/`toManifest` surface around the author's `run`.
- */
+/** Define an action: validates the public `type` at definition time and wraps `run` with execute/loadOptions/toManifest. */
 export function defineAction<TProps extends PropsSchema, TOutput>(
   def: ActionDefinition<TProps, TOutput>,
 ): Action<TProps, TOutput> {

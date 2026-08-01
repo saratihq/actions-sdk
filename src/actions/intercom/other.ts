@@ -49,10 +49,7 @@ export const listConversations = defineAction({
   },
 });
 
-/**
- * List admins (teammates). Read-only and the benign live-smoke action for
- * Intercom — it also underpins the owner picker on `create_contact`.
- */
+/** List admins (teammates); also underpins the owner picker on `create_contact`. */
 export const listAdmins = defineAction({
   type: LIST_ADMINS_TYPE,
   name: 'List admins',

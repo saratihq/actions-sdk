@@ -1,10 +1,3 @@
-/**
- * Retry policy and backoff maths. The client's request loop owns *when* to retry
- * (only retryable failures, only idempotent-by-default reads unless the caller
- * opts in); these helpers own *how long* to wait. Kept pure and separate so the
- * timing logic is unit-testable without a network.
- */
-
 export interface RetryPolicy {
   /** Max additional attempts after the first (so 3 = up to 4 total sends). */
   retries: number;
@@ -33,11 +26,7 @@ export function backoffDelay(attempt: number, policy: RetryPolicy): number {
   return Math.round(half + Math.random() * half);
 }
 
-/**
- * Parse a `Retry-After` header into milliseconds. Supports both forms in the
- * spec: delta-seconds (`120`) and an HTTP date. Returns null when absent or
- * unparseable so the caller falls back to backoff.
- */
+/** Parse a `Retry-After` header (delta-seconds or HTTP date) to ms; null when absent/unparseable so the caller backs off. */
 export function parseRetryAfter(value: string | undefined): number | null {
   if (!value) return null;
   const trimmed = value.trim();

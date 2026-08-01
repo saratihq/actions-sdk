@@ -5,13 +5,7 @@ import { toRecipients } from './common';
 import { listFolders } from './folders';
 import { getMessage, listMessages, sendEmail } from './messages';
 
-/**
- * Golden offline tests for the Outlook (Microsoft Graph) actions. A
- * {@link FakeTransport} replays canned Graph responses and records requests,
- * asserting the sendMail body, the `$search` vs `$orderby` branch (+ ConsistencyLevel
- * header), the folder-scoped path, and `@odata.nextLink` pagination without a
- * connection.
- */
+/** Offline harness: a {@link FakeTransport} replays canned Graph responses and records requests. */
 function fake(handler: (req: NormalizedRequest, i: number) => NormalizedResponse) {
   const transport = new FakeTransport(handler);
   return { auth: stubAuth(transport, 'oauth2'), http: new HttpClient(), transport };

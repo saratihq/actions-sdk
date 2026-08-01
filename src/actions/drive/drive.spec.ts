@@ -3,12 +3,7 @@ import type { NormalizedRequest, NormalizedResponse } from '../../core/http/type
 import { FakeTransport, stubAuth } from '../../testing/fakes';
 import { createFolder, getFile, listFiles } from './files';
 
-/**
- * Golden offline tests for the Google Drive actions. A {@link FakeTransport}
- * replays canned API v3 responses and records the request, asserting the
- * list/get/create-folder endpoints and `nextPageToken` pagination without a
- * connection. (See drive.live.spec.ts for the live smoke tests.)
- */
+/** Golden offline tests for the Google Drive actions, driven by a {@link FakeTransport}. */
 function fake(handler: (req: NormalizedRequest, i: number) => NormalizedResponse) {
   const transport = new FakeTransport(handler);
   return { auth: stubAuth(transport, 'oauth2'), http: new HttpClient(), transport };

@@ -9,13 +9,7 @@ import type {
   AgentToolCall,
 } from './types';
 
-/**
- * The OpenAI / Mistral `/chat/completions` tool-calling shape (both APIs are
- * byte-identical here). Tools are `{ type:"function", function:{…} }`; the model's
- * calls come back as `message.tool_calls` with a JSON-STRING `arguments`; results
- * go back as standalone `{ role:"tool", tool_call_id, content }` messages. Verified
- * against the OpenAI function-calling guide and Mistral's function-calling docs.
- */
+/** The OpenAI / Mistral `/chat/completions` tool-calling shape — both APIs are identical here. */
 
 /** Serialize the buffer to chat-completions messages (system prepended). */
 function chatMessages(req: AgentModelRequest): JsonValue {
@@ -64,8 +58,7 @@ function buildBody(req: AgentModelRequest): JsonValue {
   return {
     model: req.model,
     messages: chatMessages(req),
-    // A zero-tool request omits `tools` entirely — OpenAI/Mistral 400 on an empty
-    // `tools` array (a tools-less "just reason" agent is valid; §2).
+    // Omit `tools` entirely when empty — OpenAI/Mistral 400 on an empty `tools` array.
     ...(req.tools.length > 0
       ? {
           tools: req.tools.map((tool) => ({

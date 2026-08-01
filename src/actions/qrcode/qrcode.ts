@@ -4,11 +4,7 @@ import { defineAction } from '../../core/action';
 import { ActionError } from '../../core/errors';
 import { dropdown, type FileInput, longText, number } from '../../core/props';
 
-/**
- * QR Code utility — a no-auth (`none` scheme) action. Backed by `qrcode`
- * (MIT). Beyond returning the file, it surfaces the error-correction level as a
- * config option.
- */
+/** QR Code utility — a no-auth action backed by `qrcode` (MIT). */
 
 type ErrorCorrectionLevel = 'L' | 'M' | 'Q' | 'H';
 

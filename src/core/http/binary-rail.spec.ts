@@ -3,10 +3,7 @@ import { buildMultipart } from './multipart';
 import { DirectTransport } from './transport-direct';
 import type { NormalizedRequest } from './types';
 
-/**
- * The file/binary path on the direct transport: it carries multipart uploads and
- * binary downloads natively — raw bytes over the wire, never text-decoded.
- */
+/** The file/binary path on the direct transport: raw bytes over the wire, never text-decoded. */
 
 describe('DirectTransport — multipart upload', () => {
   it('encodes a multipart body to raw bytes over the wire with a boundary content-type', async () => {

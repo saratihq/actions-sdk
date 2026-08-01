@@ -72,8 +72,7 @@ describe('encodeMultipart', () => {
       files: { f: { filename: 'a"\r\nContent-Disposition: evil', data: Buffer.from('x') } },
     });
     const text = encodeMultipart(body).body.toString('latin1');
-    // The only real Content-Disposition line is the one part header; the injected
-    // one is percent-escaped, not a second header.
+    // The injected Content-Disposition is percent-escaped, not a second header.
     expect(text.match(/\r\nContent-Disposition:/g)?.length).toBe(1);
     expect(text).toContain('%22%0D%0A');
   });

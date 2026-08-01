@@ -6,12 +6,7 @@ import { createRepoWebhook, deleteRepoWebhook, verifyGithubDelivery } from './we
 /** Public type for the registered-webhook trigger. */
 export const NEW_ISSUE_TYPE = 'github.new_issue';
 
-/**
- * A normalised issue event — what a workflow step receives. Trimmed to the fields
- * workflows use; `action` is carried so a workflow can branch on `opened` vs
- * `edited`/`closed`/… downstream (GitHub delivers every issue action on the
- * `issues` subscription).
- */
+/** A normalised issue event; `action` is carried because GitHub delivers EVERY issue action here. */
 export interface GithubIssueEvent {
   /** `opened` | `edited` | `closed` | `reopened` | `labeled` | … */
   action: string;
@@ -48,16 +43,7 @@ interface GithubIssuePayload {
   sender?: { login?: string };
 }
 
-/**
- * A REGISTERED webhook trigger for GitHub issues: `onEnable` creates a repo
- * webhook subscribed to the `issues` event, pointed at the configured public intake and
- * signed with the runtime's per-trigger secret; inbound deliveries are
- * authenticated by their `X-Hub-Signature-256` HMAC before the payload is
- * trusted; `onDisable` deletes the hook. Mirrors `github.new_push` exactly (same
- * register/verify/dedupe contract) — only the subscribed event and the transform
- * differ. GitHub sends every issue action on this subscription; the transform
- * carries `action` so the workflow filters downstream.
- */
+/** A registered webhook trigger for GitHub issues: create hook → verify HMAC → transform → delete hook. */
 export const newIssue = defineTrigger({
   type: NEW_ISSUE_TYPE,
   strategy: 'webhook',
@@ -97,9 +83,7 @@ export const newIssue = defineTrigger({
   /** Authenticate the delivery with the per-trigger secret before trusting the payload. */
   verify: verifyGithubDelivery,
   onRequest({ request }): GithubIssueEvent[] {
-    // GitHub's event type lives in a header, never the body. The `ping` GitHub
-    // sends on hook creation is an authentic, signed delivery that carries no
-    // issue — acknowledge anything that isn't an issues event (return nothing).
+    // The event type lives in a header, never the body; the creation `ping` is signed but carries no issue.
     if (request.headers['x-github-event'] !== 'issues') return [];
 
     const body = request.body as GithubIssuePayload | undefined;

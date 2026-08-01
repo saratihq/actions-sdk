@@ -12,11 +12,7 @@ import {
 /** Anthropic authenticates with the raw key in `x-api-key` (no bearer prefix). */
 const claudeAuth: ApiKeyScheme = { type: 'apiKey', in: 'header', name: 'x-api-key' };
 
-/**
- * Anthropic has no `response_format`, so JSON output is requested by appending an
- * instruction to the system prompt. Returns undefined only when there is no
- * system prompt AND JSON output is off (so `system` is omitted from the body).
- */
+/** Anthropic has no `response_format`, so JSON output is requested via the system prompt. */
 function claudeSystem(input: GenerateInput): string | undefined {
   if (input.jsonOutput) return `${input.system ?? ''}\n\nRespond with only valid JSON.`;
   return input.system;

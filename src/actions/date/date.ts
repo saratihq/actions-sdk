@@ -3,11 +3,8 @@ import { ActionError } from '../../core/errors';
 import { dropdown, number, shortText } from '../../core/props';
 
 /**
- * Date utilities — no-auth (`none` scheme) actions. Dependency-free:
- * calendar-part extraction and formatting
- * use the platform `Intl.DateTimeFormat` (timezone-aware), and arithmetic runs on
- * epoch/UTC, so there is no `dayjs`/`moment` dependency. Formatting supports a
- * dayjs-style token subset (`YYYY MM DD HH mm ss`, month/day names, `A/a`).
+ * Date utilities — no-auth, dependency-free actions: `Intl.DateTimeFormat` for calendar parts,
+ * epoch/UTC for arithmetic, and a dayjs-style token subset for formatting.
  */
 
 const MONTHS_LONG = [

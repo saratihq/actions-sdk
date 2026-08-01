@@ -35,14 +35,7 @@ export interface StripeCustomerEvent {
   livemode: boolean;
 }
 
-/**
- * A REGISTERED webhook trigger for new Stripe customers: `onEnable` creates a
- * Stripe webhook endpoint subscribed to `customer.created`; the `whsec_…` secret
- * Stripe returns is persisted in the registration handle and checked on every
- * inbound `Stripe-Signature` before the payload is trusted; `onDisable` deletes
- * the endpoint. Shares Stripe's register/verify/dedupe plumbing with
- * `stripe.payment_succeeded` — only the subscribed event and the transform differ.
- */
+/** Registered webhook trigger for new Stripe customers — `onEnable` creates the endpoint, `onDisable` deletes it. */
 export const newCustomer = defineTrigger({
   type: NEW_CUSTOMER_TYPE,
   strategy: 'webhook',

@@ -62,11 +62,7 @@ export const getContact = defineAction({
   },
 });
 
-/**
- * Create a contact (a `user` or a `lead`). The **owner picker is live** (admins
- * are a small, prop-independent set). `customAttributes` is the escape hatch for
- * app-defined fields.
- */
+/** Create a contact (`user` or `lead`); `customAttributes` carries app-defined fields. */
 export const createContact = defineAction({
   type: CREATE_CONTACT_TYPE,
   name: 'Create contact',
@@ -119,10 +115,7 @@ export const createContact = defineAction({
   },
 });
 
-/**
- * Search contacts by a single field/operator/value (Intercom's search DSL). For
- * a complex multi-clause query, pass a raw `query` object instead.
- */
+/** Search contacts by field/operator/value, or pass a raw multi-clause `query` object. */
 export const searchContacts = defineAction({
   type: SEARCH_CONTACTS_TYPE,
   name: 'Search contacts',

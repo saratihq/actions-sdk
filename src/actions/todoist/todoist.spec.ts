@@ -3,13 +3,6 @@ import type { NormalizedRequest, NormalizedResponse } from '../../core/http/type
 import { FakeTransport, stubAuth } from '../../testing/fakes';
 import { closeTask, createTask, getTasks, updateTask } from './tasks';
 
-/**
- * Golden offline tests for the Todoist actions. A {@link FakeTransport} replays
- * canned unified-API-v1 responses (`{ results }` for lists) and records requests,
- * asserting the create body (with the inverted priority scale), the project-scoped
- * cursor-paged get, the POST partial-update, the 204 close synthesis, and the live
- * project picker without a connection.
- */
 function fake(handler: (req: NormalizedRequest, i: number) => NormalizedResponse) {
   const transport = new FakeTransport(handler);
   return { auth: stubAuth(transport, 'oauth2'), http: new HttpClient(), transport };

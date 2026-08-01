@@ -6,12 +6,7 @@ import type { JsonValue } from '../../core/http/types';
 import { file, type FileInput, json, longText, shortText } from '../../core/props';
 import { getTargetPages, mapVisualToIntrinsic, normalizedRotation, toBytes } from './common';
 
-/**
- * PDF utilities — no-auth (`none` scheme) actions. Generation/merge/page-ops
- * are backed by `pdf-lib` (MIT); text extraction by `unpdf` (MIT, a maintained
- * pdf.js build). Action names are snake_case for the SDK namespace (which forbids
- * uppercase), so camelCase forms (`extractText`, `textToPdf`, …) are re-spelled.
- */
+/** PDF utilities — no-auth actions on `pdf-lib` + `unpdf` (MIT); type ids are snake_case (the namespace forbids uppercase). */
 
 /** A file an action produces, in the SDK's file-output shape (see `slack.get_file`). */
 export interface PdfFileResult {
@@ -40,11 +35,7 @@ interface UnpdfModule {
   getDocumentProxy(data: Uint8Array): Promise<unknown>;
   extractText(pdf: unknown, options: { mergePages: boolean }): Promise<{ text: string; totalPages: number }>;
 }
-/**
- * A real dynamic `import()` that TypeScript will not down-level to `require()`
- * under `module: commonjs` — the only way a CJS build can load the ESM-only
- * `unpdf`. The Jest suite enables it via `--experimental-vm-modules`.
- */
+/** Needs `--experimental-vm-modules` under Jest for the dynamic import to resolve. */
 // eslint-disable-next-line @typescript-eslint/no-implied-eval -- the only way a CJS build can load the ESM-only `unpdf`; TS must not down-level this import().
 const importEsm = new Function('specifier', 'return import(specifier)') as (s: string) => Promise<unknown>;
 

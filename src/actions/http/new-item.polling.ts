@@ -4,19 +4,8 @@ import type { JsonValue } from '../../core/http/types';
 import { shortText } from '../../core/props';
 
 /**
- * Generic HTTP polling trigger (`http.new_item`) — the "HTTP-poll style" reference
- * for the SDK polling framework. Each poll GETs a URL, extracts an array of items
- * (the whole body, or a dot-path into it), and the SDK's `runPoll` dedupes by a
- * stable key so only items not seen in a prior poll fire. No-auth: callers pass
- * their own headers on the connection; the direct transport attaches nothing.
- *
- * Cursor semantics mirror the SDK's time-based polling framework: the trigger
- * returns *candidates*, the framework advances the `lastPolledAt`
- * watermark and keeps a bounded `seen` set of dedupe keys — new events only.
- *
- * NOTE: the SDK's `dedupeKey(item)` receives only the item (not props), so the
- * dedupe identity is derived from the item itself — a common id-like field when
- * present, else the item's canonical JSON.
+ * Generic HTTP polling trigger: GET a URL, extract an item array, let the SDK dedupe.
+ * `dedupeKey(item)` receives only the item, so identity comes from an id-like field or its canonical JSON.
  */
 
 /** Navigate a dot-path (e.g. `data.items`) into a JSON value; undefined if absent. */
@@ -61,8 +50,7 @@ export const newItem = defineTrigger({
     }),
   },
   async poll({ auth, props, http }): Promise<JsonValue[]> {
-    // SSRF guard: the polled URL is fully user-controlled on the no-auth direct
-    // transport — block private/internal/cloud-metadata targets before we fetch.
+    // SSRF guard: this URL is fully user-controlled, so block private/internal targets before fetching.
     await guardUserUrl(props.url);
     const res = await http.get<JsonValue>(props.url, { auth });
     const extracted = atPath(res.data, props.itemsPath ?? '');

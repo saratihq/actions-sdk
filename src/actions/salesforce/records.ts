@@ -18,10 +18,7 @@ export const GET_RECORD_TYPE = 'salesforce.get_record';
 export const UPDATE_RECORD_TYPE = 'salesforce.update_record';
 export const DELETE_RECORD_TYPE = 'salesforce.delete_record';
 
-/**
- * Run a SOQL query. Read-only and the benign live-smoke action for Salesforce,
- * e.g. `SELECT Id, Name FROM Account LIMIT 5`.
- */
+/** Run a read-only SOQL query, e.g. `SELECT Id, Name FROM Account LIMIT 5`. */
 export const runQuery = defineAction({
   type: RUN_QUERY_TYPE,
   name: 'Run SOQL query',
@@ -116,10 +113,7 @@ export const getRecord = defineAction({
   },
 });
 
-/**
- * Update fields on a record. Salesforce replies `204 No Content` on success, so
- * this returns a synthesised `{ id, success }` rather than an empty body.
- */
+/** Update fields on a record; Salesforce replies `204 No Content`, so `{ id, success }` is synthesised. */
 export const updateRecord = defineAction({
   type: UPDATE_RECORD_TYPE,
   name: 'Update record',

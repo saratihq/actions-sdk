@@ -11,10 +11,7 @@ import {
   PRIORITY_OPTIONS,
 } from './common';
 
-/**
- * Public catalog ids for the ClickUp task actions. `list_tasks` lists the tasks
- * in a single list; a workspace-scoped listing is a separate capability.
- */
+/** Public catalog ids for the ClickUp task actions. */
 export const CREATE_TASK_TYPE = 'clickup.create_task';
 export const GET_TASK_TYPE = 'clickup.get_list_task';
 export const UPDATE_TASK_TYPE = 'clickup.update_task';
@@ -29,10 +26,7 @@ function priorityProp() {
   });
 }
 
-/**
- * Create a task in a list (live picker). `assignees` is an array of numeric user
- * ids; `dueDate` is a Unix timestamp in milliseconds.
- */
+/** Create a task in a list; `assignees` are numeric user ids and `dueDate` is Unix millis. */
 export const createTask = defineAction({
   type: CREATE_TASK_TYPE,
   name: 'Create task',

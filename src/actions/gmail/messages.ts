@@ -12,12 +12,7 @@ import {
   labelOptions,
 } from './common';
 
-/**
- * Public action type ids. Where the catalog already carries an id for the same
- * capability, these reuse that exact id (`gmail.send_email`,
- * `gmail.gmail_get_mail`, `gmail.gmail_search_mail`) so that existing plans
- * referencing the established id resolve to these actions.
- */
+/** Public catalog ids — stable; existing plans reference them verbatim. */
 export const GET_PROFILE_TYPE = 'gmail.get_profile';
 export const LIST_MESSAGES_TYPE = 'gmail.list_messages';
 export const GET_EMAIL_TYPE = 'gmail.gmail_get_mail';
@@ -54,10 +49,7 @@ export const getProfile = defineAction({
   },
 });
 
-/**
- * List message ids matching a Gmail search query (e.g. `from:boss is:unread`),
- * optionally scoped to labels (live picker), following `nextPageToken` up to `limit`.
- */
+/** List message ids matching a Gmail search query, following `nextPageToken` up to `limit`. */
 export const listMessages = defineAction({
   type: LIST_MESSAGES_TYPE,
   name: 'List messages',
@@ -95,12 +87,7 @@ export const listMessages = defineAction({
   },
 });
 
-/**
- * Find emails by the common structured filters (from / to / subject / raw query /
- * label / max). The friendly-input sibling of {@link listMessages}: it composes a
- * Gmail `q` from the filters and returns the matching message refs, newest first,
- * up to `max`. Fetch a match's content with {@link getEmail}.
- */
+/** Find emails by structured filters — the friendly-input sibling of {@link listMessages}. */
 export const findEmail = defineAction({
   type: SEARCH_EMAIL_TYPE,
   name: 'Find email',
@@ -176,11 +163,7 @@ export const getEmail = defineAction({
   },
 });
 
-/**
- * Send a plain-text email. The RFC822 message is assembled and base64url-encoded
- * into the JSON `raw` field, so it works over the same transport as every other
- * action.
- */
+/** Send a plain-text email as a base64url-encoded RFC822 message in the JSON `raw` field. */
 export const sendEmail = defineAction({
   type: SEND_EMAIL_TYPE,
   name: 'Send email',

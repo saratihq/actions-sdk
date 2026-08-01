@@ -6,12 +6,7 @@ import { createRepoWebhook, deleteRepoWebhook, verifyGithubDelivery } from './we
 /** Public type for the registered-webhook trigger. */
 export const NEW_PULL_REQUEST_TYPE = 'github.new_pull_request';
 
-/**
- * A normalised pull-request event — what a workflow step receives. Trimmed to the
- * fields workflows use; `action` is carried so a workflow can branch on `opened`
- * vs `synchronize`/`closed`/… downstream (GitHub delivers every PR action on the
- * `pull_request` subscription).
- */
+/** A normalised pull-request event; `action` is carried because GitHub delivers EVERY PR action here. */
 export interface GithubPullRequestEvent {
   /** `opened` | `edited` | `closed` | `reopened` | `synchronize` | … */
   action: string;
@@ -57,16 +52,7 @@ interface GithubPullRequestPayload {
   sender?: { login?: string };
 }
 
-/**
- * A REGISTERED webhook trigger for GitHub pull requests: `onEnable` creates a
- * repo webhook subscribed to the `pull_request` event, pointed at the configured public
- * intake and signed with the runtime's per-trigger secret; inbound deliveries are
- * authenticated by their `X-Hub-Signature-256` HMAC before the payload is
- * trusted; `onDisable` deletes the hook. Mirrors `github.new_push` exactly (same
- * register/verify/dedupe contract) — only the subscribed event and the transform
- * differ. GitHub sends every PR action on this subscription; the transform
- * carries `action` so the workflow filters downstream.
- */
+/** A registered webhook trigger for GitHub PRs: create hook → verify HMAC → transform → delete hook. */
 export const newPullRequest = defineTrigger({
   type: NEW_PULL_REQUEST_TYPE,
   strategy: 'webhook',
@@ -109,9 +95,7 @@ export const newPullRequest = defineTrigger({
   /** Authenticate the delivery with the per-trigger secret before trusting the payload. */
   verify: verifyGithubDelivery,
   onRequest({ request }): GithubPullRequestEvent[] {
-    // GitHub's event type lives in a header, never the body. The `ping` GitHub
-    // sends on hook creation is an authentic, signed delivery that carries no PR —
-    // acknowledge anything that isn't a pull_request event (return nothing).
+    // The event type lives in a header, never the body; the creation `ping` is signed but carries no PR.
     if (request.headers['x-github-event'] !== 'pull_request') return [];
 
     const body = request.body as GithubPullRequestPayload | undefined;

@@ -1,13 +1,10 @@
 import { defineAction } from '../../core/action';
 import { type CalendarListEntry, calendarAuth, listCalendarList } from './common';
 
-/** Public action type id — no equivalent existed before, so a new underscore id. */
+/** Public catalog id — stable. */
 export const LIST_CALENDARS_TYPE = 'calendar.list_calendars';
 
-/**
- * List the calendars on the connected account. Read-only, and a benign live-smoke
- * action for Calendar — it also underpins the calendar picker on every event action.
- */
+/** List the calendars on the connected account; also underpins the calendar picker. */
 export const listCalendars = defineAction({
   type: LIST_CALENDARS_TYPE,
   name: 'List calendars',

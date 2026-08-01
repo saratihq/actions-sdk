@@ -6,10 +6,7 @@ import { longText, shortText } from '../../core/props';
 export const LIST_LABELS_TYPE = 'gmail.list_labels';
 export const CREATE_DRAFT_TYPE = 'gmail.create_draft';
 
-/**
- * List labels. Read-only and a benign live-smoke action for Gmail — it also
- * underpins the label picker on `list_messages`.
- */
+/** List labels; also underpins the label picker on `list_messages`. */
 export const listLabels = defineAction({
   type: LIST_LABELS_TYPE,
   name: 'List labels',

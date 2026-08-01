@@ -9,24 +9,7 @@ import {
   type SalesforceQueryResult,
 } from './common';
 
-/**
- * Polling trigger (`salesforce.new_record`) — fires when a record of a chosen
- * SObject is created, via a SOQL since-cursor poll.
- *
- * STRATEGY — polling, not a registered webhook. Salesforce's push mechanisms
- * (PushTopic / Streaming API / Change Data Capture) ride CometD long-polling, not
- * a registerable per-connection HTTP webhook with a caller-owned secret, so the
- * correct-by-construction choice is to poll the REST Query resource with a
- * `CreatedDate` watermark and dedupe by record id.
- *
- * Query shape (GET `/services/data/vXX.0/query?q=…`, `{ totalSize, done,
- * records[], nextRecordsUrl }`) is Salesforce's public contract — see
- * https://developer.salesforce.com/docs/atlas.en-us.api_rest.meta/api_rest/dome_query.htm .
- * SOQL datetime literals are **unquoted** ISO-8601 in UTC (`2025-06-15T00:00:00Z`)
- * — see the SOQL/SOSL date-formats reference — and `CreatedDate` comes back ISO.
- * Ordering `CreatedDate ASC` + advancing the watermark guarantees forward
- * progress; a burst larger than one page drains across polls with no miss.
- */
+/** Polling trigger (`salesforce.new_record`) — fires when a record of a chosen SObject is created, via a SOQL `CreatedDate` since-cursor poll. */
 export const NEW_RECORD_TYPE = 'salesforce.new_record';
 
 /** Seconds re-scanned each poll so a same-second-as-watermark record is never missed (id-dedup drops the re-emit). */
@@ -121,7 +104,6 @@ export const newRecord = defineTrigger({
       .filter((f) => f.length > 0)
       .map((f) => assertIdentifier(f, 'field'));
     const selected = ['Id', 'CreatedDate', ...extra];
-    // De-dup the SELECT list while preserving order.
     const selectClause = [...new Set(selected)].join(', ');
 
     const stored = await store.get<number>('cursor');

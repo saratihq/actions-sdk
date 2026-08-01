@@ -7,10 +7,7 @@ import { subdomainProp, type ZendeskUser, zendeskAuth, zendeskBaseUrl, zendeskNe
 export const SEARCH_TYPE = 'zendesk.search';
 export const LIST_USERS_TYPE = 'zendesk.list_users';
 
-/**
- * Run a Zendesk search (the unified search API), e.g.
- * `type:ticket status:open` or `requester:jane@acme.com`. Returns one page.
- */
+/** Run a Zendesk search, e.g. `type:ticket status:open`; returns one page. */
 export const search = defineAction({
   type: SEARCH_TYPE,
   name: 'Search',

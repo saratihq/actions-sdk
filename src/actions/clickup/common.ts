@@ -3,20 +3,11 @@ import type { HttpClient } from '../../core/http/client';
 import type { NextPageFn } from '../../core/http/pagination';
 import { dropdown, type DropdownOption, type DropdownSchema } from '../../core/props';
 
-/**
- * Shared ClickUp (API v2) building blocks: the `/api/v2` REST endpoints, the
- * team→space→folder→list hierarchy, the numeric priority scale, and the
- * `Authorization`-header token convention. Everything is JSON, so every action
- * works over both transports (a managed proxy, or a BYO personal token).
- */
+/** Shared ClickUp (API v2) building blocks: the team→space→folder→list hierarchy and priority scale. */
 
 export const CLICKUP_API_BASE = 'https://api.clickup.com/api/v2';
 
-/**
- * ClickUp personal tokens attach as a bare `Authorization` value (no `Bearer`
- * prefix); managed OAuth tokens are attached by the proxy server-side. Declared
- * as an `apiKey` header scheme so both transports work with byte-identical action code.
- */
+/** ClickUp tokens attach as a BARE `Authorization` value — no `Bearer ` prefix. */
 export const clickupAuth: ApiKeyScheme = { type: 'apiKey', in: 'header', name: 'Authorization' };
 
 /** A ClickUp object reference (id + name), the shape reads and pickers use. */
@@ -72,14 +63,7 @@ export async function listSpaces(http: HttpClient, auth: AuthHandle): Promise<Cl
   return spaces;
 }
 
-/**
- * Fetch every list the user can reach by walking the hierarchy
- * (spaces → folderless lists + folders' lists). Prop-independent, so it works
- * under today's loader contract — at the cost of one request per space plus one
- * per space for its folders (bounded by the account's real structure). A
- * per-space `list` picker would be cheaper but needs a `space` refresher the
- * loader can't read yet.
- */
+/** Walk spaces → folderless lists + folders' lists; prop-independent, as the loader contract requires. */
 export async function listAllLists(http: HttpClient, auth: AuthHandle): Promise<ClickupList[]> {
   const spaces = await listSpaces(http, auth);
   const lists: ClickupList[] = [];
@@ -125,11 +109,7 @@ export function listIdProp(): DropdownSchema<string, true> {
   });
 }
 
-/**
- * ClickUp lists paginate by a 0-based `page` param and signal the end with
- * `last_page: true` in the body. This advances the page while `last_page` is
- * explicitly `false`, and stops otherwise (true, or absent on a short result).
- */
+/** ClickUp pages on a 0-based `page` param; only an explicit `last_page: false` continues the walk. */
 export function clickupPageCursor(): NextPageFn {
   return (response, currentUrl) => {
     const body = response.data as { last_page?: boolean };

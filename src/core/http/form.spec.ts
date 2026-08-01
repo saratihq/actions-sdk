@@ -5,11 +5,7 @@ import { FORM, isFormBody } from './types';
 import { createAuthHandle } from '../auth';
 import { fakeFetch, fakeResponse } from '../../testing/fakes';
 
-/**
- * The `application/x-www-form-urlencoded` body rail (the Stripe-write gap closer).
- * Mirrors `multipart.spec.ts`: the build/encode split is unit-tested here, then
- * the direct transport is proven to put a real url-encoded body on the wire.
- */
+/** The `application/x-www-form-urlencoded` body rail: build/encode split, then a real url-encoded body on the wire. */
 describe('buildForm', () => {
   it('flattens scalars and drops null/undefined, preserving order', () => {
     const body = buildForm({

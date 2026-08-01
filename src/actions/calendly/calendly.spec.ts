@@ -9,11 +9,7 @@ import {
   listScheduledEvents,
 } from './events';
 
-/**
- * Offline tests for the Calendly actions. A {@link FakeTransport} replays canned
- * v2 envelopes and records requests, asserting the `/users/me` scoping,
- * `next_page` pagination, and the live event picker without a connection.
- */
+/** Offline tests for the Calendly actions, driven by a {@link FakeTransport}. */
 const USER_URI = 'https://api.calendly.com/users/U1';
 
 function fake(handler: (req: NormalizedRequest, i: number) => NormalizedResponse) {

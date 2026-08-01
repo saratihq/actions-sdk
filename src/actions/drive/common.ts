@@ -1,14 +1,8 @@
 import type { OAuth2Scheme } from '../../core/auth';
 
 /**
- * Shared Google Drive (API v3) building blocks: the `/drive/v3/files` endpoints,
- * OAuth2 Bearer auth, the `q` search grammar, and the `files` envelope.
- *
- * Managed-file limitation: the managed proxy carries JSON only, so uploading or
- * downloading file CONTENT (`alt=media`, multipart `uploadType`) cannot go over
- * the managed transport. These actions therefore cover the JSON-metadata surface
- * only — list/search, get metadata, create a folder. Binary upload/download needs
- * a direct (bring-your-own) connection.
+ * Shared Google Drive (API v3) building blocks: `/drive/v3/files`, OAuth2 bearer auth, the `q` grammar.
+ * JSON-metadata surface only — the managed proxy carries JSON, so file CONTENT cannot ride it.
  */
 
 export const DRIVE_FILES_URL = 'https://www.googleapis.com/drive/v3/files';

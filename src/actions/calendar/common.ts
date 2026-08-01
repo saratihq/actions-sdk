@@ -4,17 +4,8 @@ import type { HttpClient } from '../../core/http/client';
 import { dropdown, type DropdownOption, type DropdownSchema } from '../../core/props';
 
 /**
- * Shared Google Calendar (API v3) building blocks: the
- * `/calendar/v3/calendars/{calendarId}/events` endpoints, the `calendarList`
- * resource, OAuth2 Bearer auth, and the `{ start: { dateTime }, end: {...} }`
- * event shape. Everything is JSON, so every action works over the managed
- * transport (no multipart).
- *
- * These actions run on the SDK's single http client and a host-supplied managed
- * proxy transport, which attaches the real token server-side — so managed Google
- * Calendar works over the managed transport. (A provider built on
- * `googleapis`/`gaxios` cannot run over the managed transport: its sentinel token
- * leaks and Google rejects the call.)
+ * Shared Google Calendar (API v3) building blocks: the events endpoints, `calendarList`, and the
+ * event shape. Everything must stay plain JSON on the SDK http client so the managed transport works.
  */
 
 export const CALENDAR_API_BASE = 'https://www.googleapis.com/calendar/v3';
@@ -76,11 +67,7 @@ export async function listCalendarList(http: HttpClient, auth: AuthHandle): Prom
   return res.data.items ?? [];
 }
 
-/**
- * Live calendar picker — independent of any other prop (it lists the user's own
- * calendars), so it works under the loader contract. The primary calendar is
- * surfaced first with a `(primary)` hint.
- */
+/** Live calendar picker — must stay independent of other props, per the loader contract. */
 export async function calendarOptions(http: HttpClient, auth: AuthHandle): Promise<DropdownOption<string>[]> {
   const calendars = await listCalendarList(http, auth);
   return calendars.map((cal) => ({
@@ -99,13 +86,7 @@ export function calendarIdProp(): DropdownSchema<string, true> {
   });
 }
 
-/**
- * `sendUpdates` controls whether Google emails attendees on create/update/delete.
- * Google DEFAULTS this to `false`/`none` on the API, so without it attendees are
- * silently added but never notified — the opposite of what the Calendar UI does.
- * It defaults to `all` so invites/updates/cancellations actually send.
- * Values: https://developers.google.com/workspace/calendar/api/v3/reference/events/insert
- */
+/** Google's API defaults `sendUpdates` to `none`, so attendees are added silently unless it is sent. */
 export const SEND_UPDATES_OPTIONS: DropdownOption<string>[] = [
   { label: 'All guests', value: 'all' },
   { label: 'External guests only', value: 'externalOnly' },
@@ -136,13 +117,7 @@ export function defaultEnd(startIso: string): string {
   return new Date(Date.parse(startIso) + DEFAULT_DURATION_MS).toISOString();
 }
 
-/**
- * Coerce a caller's `attendees` input into Google's `[{ email }]` request shape.
- * Accepts a JSON array of email strings (`["a@b.com"]`) or of objects
- * (`[{ email }]`); a non-array, or an entry with no email, is a named
- * `invalid_input` (not a silent drop that would create the event without its
- * guests). Returns the request shape (email only) — response attendees carry more.
- */
+/** Coerce `attendees` (email strings or `{ email }` objects) into Google's shape; a bad entry throws. */
 export function toAttendees(value: unknown): Array<{ email: string }> {
   if (!Array.isArray(value)) {
     throw new ActionError({

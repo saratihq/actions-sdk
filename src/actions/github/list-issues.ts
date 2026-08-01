@@ -6,13 +6,7 @@ import { dropdown, number, shortText } from '../../core/props';
 /** Public type — a stable public catalog id. */
 export const LIST_ISSUES_TYPE = 'github.list_issues';
 
-/**
- * GitHub authenticates a personal-access / OAuth token via the `Authorization`
- * header. Declared as an `apiKey` scheme (a DIFFERENT shape from Slack's
- * `oauth2`) — proving the auth seam is general. Public repositories read
- * unauthenticated through the very same direct transport, so `{ type: 'none' }`
- * works too.
- */
+/** A PAT/OAuth token on the `Authorization` header; public repos also read fine with a `none` credential. */
 export const githubTokenAuth: ApiKeyScheme = {
   type: 'apiKey',
   in: 'header',
@@ -45,11 +39,7 @@ export interface GithubIssue {
   pull_request?: unknown;
 }
 
-/**
- * A paginated REST read: GitHub paginates via the `Link` header (`rel="next"`),
- * a different shape from a body cursor — so this action exercises the header-based
- * pagination strategy AND the direct transport with a non-OAuth scheme in one go.
- */
+/** A paginated REST read; GitHub paginates via the `Link` header (`rel="next"`), not a body cursor. */
 export const listIssues = defineAction({
   type: LIST_ISSUES_TYPE,
   name: 'List issues',

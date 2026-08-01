@@ -5,13 +5,7 @@ import { newSubscriber } from './new-subscriber.polling';
 
 const PROPS = { serverPrefix: 'us19', listId: 'abc123def' };
 
-/**
- * A `GET /lists/{id}/members` response (shape from the public
- * list-members docs): a `members` array of member objects + `total_items`.
- * `total_items` is the count matching the (filtered) query — the poll walks the
- * `offset`/`count` cursor until it has collected that many, so a single-page
- * fixture reports its own length.
- */
+/** A `GET /lists/{id}/members` response; `total_items` is the filtered-query count the poll pages towards. */
 function membersResponse(members: unknown[], totalItems = members.length): NormalizedResponse {
   return { status: 200, headers: {}, data: { members, total_items: totalItems } };
 }
@@ -27,11 +21,7 @@ function member(i: number): Record<string, unknown> {
   };
 }
 
-/**
- * A transport that serves `all` across `offset`/`count` pages — the real
- * Marketing API paging contract — so a burst larger than one page is returned in
- * full, not truncated to a fixed head window.
- */
+/** A transport that serves `all` across `offset`/`count` pages, as the Marketing API does. */
 function pagedTransport(all: Record<string, unknown>[]): FakeTransport {
   return new FakeTransport((req) => {
     const query = new URL(req.url).searchParams;

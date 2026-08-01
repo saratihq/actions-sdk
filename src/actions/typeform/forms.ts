@@ -16,10 +16,7 @@ export const LIST_FORMS_TYPE = 'typeform.list_forms';
 export const GET_FORM_TYPE = 'typeform.get_form';
 export const GET_FORM_FIELDS_TYPE = 'typeform.get_form_fields';
 
-/**
- * List the forms in the account, optionally filtered by a `search` term, following
- * Typeform's page-number pagination up to `limit`.
- */
+/** List the account's forms, optionally filtered by `search`, following Typeform's page-number pagination up to `limit`. */
 export const listFormsAction = defineAction({
   type: LIST_FORMS_TYPE,
   name: 'List forms',
@@ -73,10 +70,7 @@ export const getForm = defineAction({
   },
 });
 
-/**
- * Get just a form's fields (its questions) by id — the convenience read for
- * mapping answers to questions. The form picker is live.
- */
+/** Get just a form's fields (its questions) by id — the read for mapping answers back to questions. */
 export const getFormFields = defineAction({
   type: GET_FORM_FIELDS_TYPE,
   name: 'Get form fields',
