@@ -118,7 +118,7 @@ Published to npm as `orchestr-actions-sdk`, automated via semantic-release:
 - **Canary** — every push to `main` publishes `0.0.0-canary.<sha>` under the `@canary` dist-tag.
 - **Prerelease** — pushes to the `next` branch publish under `@next`.
 
-Released versions live in the git tags and [GitHub Releases](https://github.com/projectstealthr/actions-sdk/releases)
+Released versions live in the git tags and [GitHub Releases](https://github.com/saratihq/actions-sdk/releases)
 — the `version` in `package.json` is a placeholder, and each published tarball carries its own
 `CHANGELOG.md`.
 
