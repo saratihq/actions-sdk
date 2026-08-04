@@ -7,7 +7,7 @@ the user brings their own credentials or connects through a managed provider.
 ## Install
 
 ```sh
-pnpm add orchestr-actions-sdk
+pnpm add @sarati/actions-sdk
 ```
 
 Requires Node 22+.
@@ -15,7 +15,7 @@ Requires Node 22+.
 ## Quick start
 
 ```ts
-import { defineAction, dropdown, longText } from 'orchestr-actions-sdk';
+import { defineAction, dropdown, longText } from '@sarati/actions-sdk';
 
 export const sendChannelMessage = defineAction({
   type: 'slack.send_channel_message',
@@ -111,20 +111,20 @@ Live tests hit real APIs over the direct transport and self-skip unless opted in
 
 ## Releases
 
-Published to npm as `orchestr-actions-sdk`, automated via semantic-release:
+Published to npm as `@sarati/actions-sdk`, automated via semantic-release:
 
 - **Stable** — a merge to `main` with a `feat:`/`fix:` commit cuts a new version (git tag + GitHub
   release with notes + npm `@latest`). `chore:`/`docs:` commits don't release.
 - **Canary** — every push to `main` publishes `0.0.0-canary.<sha>` under the `@canary` dist-tag.
 - **Prerelease** — pushes to the `next` branch publish under `@next`.
 
-Released versions live in the git tags and [GitHub Releases](https://github.com/projectstealthr/actions-sdk/releases)
+Released versions live in the git tags and [GitHub Releases](https://github.com/saratihq/actions-sdk/releases)
 — the `version` in `package.json` is a placeholder, and each published tarball carries its own
 `CHANGELOG.md`.
 
 ```sh
-pnpm add orchestr-actions-sdk          # latest stable
-pnpm add orchestr-actions-sdk@canary   # newest main build
+pnpm add @sarati/actions-sdk          # latest stable
+pnpm add @sarati/actions-sdk@canary   # newest main build
 ```
 
 ## Contributing
