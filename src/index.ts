@@ -1,4 +1,4 @@
-/** Orchestr Action SDK public API — `createAuthHandle`/`transportOf` stay unexported so the transport is unreachable from action code. */
+/** Sarati Actions SDK public API — `createAuthHandle`/`transportOf` stay unexported so the transport is unreachable from action code. */
 
 // Errors — the one failure shape.
 export {

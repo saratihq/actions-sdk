@@ -9,7 +9,7 @@ Poll the provider on a schedule and return candidate items. The SDK drops ones a
 (by `dedupeKey`) and tracks the last-polled watermark for you.
 
 ```ts
-import { defineTrigger, shortText, none } from 'orchestr-actions-sdk';
+import { defineTrigger, shortText, none } from '@sarati/actions-sdk';
 
 export const newStory = defineTrigger({
   type: 'hackernews.new_story',
@@ -35,7 +35,7 @@ Receive a provider callback, verify it, and turn it into events. A registered we
 and removes the provider-side subscription per connection.
 
 ```ts
-import { defineTrigger, shortText, type WebhookRegistration } from 'orchestr-actions-sdk';
+import { defineTrigger, shortText, type WebhookRegistration } from '@sarati/actions-sdk';
 
 export const newIssue = defineTrigger({
   type: 'github.new_issue',
