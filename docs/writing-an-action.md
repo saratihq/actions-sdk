@@ -6,7 +6,7 @@ You declare its inputs and auth, and write a `run` function.
 ## Anatomy
 
 ```ts
-import { defineAction, shortText, longText } from 'orchestr-actions-sdk';
+import { defineAction, shortText, longText } from '@sarati/actions-sdk';
 
 export const createIssue = defineAction({
   type: 'github.create_issue', // '<app>.<action>' — the public identifier

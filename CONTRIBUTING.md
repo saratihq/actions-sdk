@@ -1,6 +1,6 @@
 # Contributing
 
-Thanks for contributing to the Orchestr Actions SDK.
+Thanks for contributing to the Sarati Actions SDK.
 
 ## Setup
 

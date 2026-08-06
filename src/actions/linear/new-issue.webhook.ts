@@ -102,7 +102,7 @@ export const newIssue = defineTrigger({
     const input: Record<string, unknown> = {
       url: webhookUrl,
       resourceTypes: ['Issue'],
-      label: 'Orchestr',
+      label: 'Sarati',
     };
     if (props.teamId !== undefined) input.teamId = props.teamId;
     else input.allPublicTeams = true;

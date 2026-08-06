@@ -1,6 +1,6 @@
-# Orchestr Actions SDK
+# Sarati Actions SDK
 
-A typed SDK for building **actions and triggers** for the Orchestr automation platform.
+A typed SDK for building **actions and triggers** for the Sarati automation platform.
 Define an integration once — its inputs, auth, and run logic — and it runs the same whether
 the user brings their own credentials or connects through a managed provider.
 
