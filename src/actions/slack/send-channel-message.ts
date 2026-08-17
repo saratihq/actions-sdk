@@ -1,7 +1,7 @@
 import { defineAction } from '../../core/action';
 import { checkbox, dropdown, longText, shortText } from '../../core/props';
 import { assertSlackOk, SLACK_API_BASE, slackOAuth, type SlackEnvelope } from './common';
-import { listSlackChannels } from './list-channels';
+import { listSlackChannels, PICKER_CHANNEL_TYPES, channelLabel } from './list-channels';
 
 /** Public type for the send-message action. */
 export const SEND_CHANNEL_MESSAGE_TYPE = 'slack.send_channel_message';
@@ -24,8 +24,11 @@ export const sendChannelMessage = defineAction({
       description: 'The channel to post to — loaded live from your workspace.',
       required: true,
       options: async ({ auth, http }) => {
-        const channels = await listSlackChannels(http, auth, { maxItems: 1000 });
-        return channels.map((channel) => ({ label: `#${channel.name}`, value: channel.id }));
+        const channels = await listSlackChannels(http, auth, {
+          types: PICKER_CHANNEL_TYPES,
+          maxItems: 1000,
+        });
+        return channels.map((channel) => ({ label: channelLabel(channel), value: channel.id }));
       },
     }),
     text: longText({
