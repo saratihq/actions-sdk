@@ -12,6 +12,7 @@ const RSS_SAMPLE = `<?xml version="1.0"?>
     <link>https://ex.com/1</link>
     <guid>guid-1</guid>
     <pubDate>Mon, 06 Jul 2026 10:00:00 GMT</pubDate>
+    <dc:creator>Ada Lovelace</dc:creator>
     <description>Hello &amp; welcome</description>
   </item>
   <item>
@@ -42,14 +43,32 @@ describe('rss feed parser', () => {
       id: 'guid-1',
       pubDate: 'Mon, 06 Jul 2026 10:00:00 GMT',
       summary: 'Hello & welcome',
+      author: 'Ada Lovelace',
     });
     expect(items[1]!.id).toBe('guid-2');
+    // Nothing in the second item names an author — absent is null, never invented.
+    expect(items[1]!.author).toBeNull();
   });
 
   it('parses Atom entries (href link + id + summary)', () => {
     const items = parseFeed(ATOM_SAMPLE);
     expect(items).toHaveLength(1);
     expect(items[0]).toMatchObject({ title: 'Atom one', link: 'https://ex.com/a1', id: 'atom-1' });
+  });
+
+  /** Who posted it is the field a human triaging community threads actually needs. */
+  it('reads the author from Atom, dc:creator and a bare RSS author alike', () => {
+    const atom = parseFeed(`<feed><entry><title>t</title><id>1</id>
+      <author><name>/u/someone</name><uri>https://r.test/u</uri></author></entry></feed>`);
+    expect(atom[0]!.author).toBe('/u/someone');
+
+    const dc = parseFeed(`<rss><channel><item><title>t</title><guid>2</guid>
+      <dc:creator><![CDATA[Jane Doe]]></dc:creator></item></channel></rss>`);
+    expect(dc[0]!.author).toBe('Jane Doe');
+
+    const bare = parseFeed(`<rss><channel><item><title>t</title><guid>3</guid>
+      <author>jane@ex.com (Jane)</author></item></channel></rss>`);
+    expect(bare[0]!.author).toBe('jane@ex.com (Jane)');
   });
 });
 

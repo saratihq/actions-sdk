@@ -6,6 +6,8 @@ export interface FeedItem {
   id: string;
   pubDate: string | null;
   summary: string;
+  /** Who posted it: Atom `<author><name>`, else `<dc:creator>`, else RSS `<author>`; null when absent. */
+  author: string | null;
 }
 
 const NAMED_ENTITIES: Record<string, string> = {
@@ -36,6 +38,20 @@ function firstTag(block: string, tag: string): string | null {
   return match ? clean(match[1] ?? '') : null;
 }
 
+/**
+ * Resolve an item's author. Atom nests it (`<author><name>…`), RSS 2.0 uses `<dc:creator>` or an
+ * `<author>` that is an email address — take the first that carries text.
+ */
+function extractAuthor(block: string): string | null {
+  const atom = /<author\b[^>]*>([\s\S]*?)<\/author>/i.exec(block);
+  if (atom) {
+    const nested = firstTag(atom[1] ?? '', 'name');
+    const inner = nested ?? clean(atom[1] ?? '');
+    if (inner) return inner;
+  }
+  return firstTag(block, 'dc:creator') ?? firstTag(block, 'creator');
+}
+
 /** Resolve an item's link: an Atom `<link href="…"/>` first, else an RSS `<link>…</link>`. */
 function extractLink(block: string): string {
   const atom = /<link\b[^>]*\bhref="([^"]*)"[^>]*\/?>/i.exec(block);
@@ -56,6 +72,7 @@ export function parseFeed(xml: string): FeedItem[] {
       id,
       pubDate: firstTag(block, 'pubDate') ?? firstTag(block, 'published') ?? firstTag(block, 'updated'),
       summary: firstTag(block, 'description') ?? firstTag(block, 'summary') ?? '',
+      author: extractAuthor(block),
     });
   }
   return items;

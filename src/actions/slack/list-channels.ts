@@ -26,6 +26,18 @@ const DEFAULT_MAX_CHANNELS = 1000;
 /** Slack caps `conversations.list` at 1000/page; 200 keeps each page light while proving multi-page. */
 const PAGE_SIZE = 200;
 
+/**
+ * What a channel PICKER asks Slack for. A monitoring or alerting channel is usually private, and
+ * the token only ever sees private channels the app was invited to, so asking for both leaks
+ * nothing and is the only way a private channel can be selected at all.
+ */
+export const PICKER_CHANNEL_TYPES = 'public_channel,private_channel';
+
+/** A picker row: private channels are marked so two same-named rows can be told apart. */
+export function channelLabel(channel: SlackChannel): string {
+  return channel.is_private ? `🔒 #${channel.name}` : `#${channel.name}`;
+}
+
 /** Fetch all channels via `conversations.list`, following Slack's cursor pagination to completion. */
 export async function listSlackChannels(
   http: HttpClient,
