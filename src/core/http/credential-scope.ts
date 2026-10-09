@@ -1,4 +1,4 @@
-import type { AuthScheme } from '../auth';
+import { type AuthHandle, type AuthScheme, createAuthHandle, transportOf } from '../auth';
 import { ActionError } from '../errors';
 import type { NormalizedRequest, NormalizedResponse, Transport } from './types';
 
@@ -34,31 +34,57 @@ function allows(rule: OriginRule, url: URL): boolean {
   return rule.anySubdomain ? url.hostname.endsWith(`.${rule.host}`) : url.hostname === rule.host;
 }
 
-function outOfScope(rules: OriginRule[], origins: readonly string[], rawUrl: string): ActionError | null {
-  let target: URL;
-  try {
-    target = new URL(rawUrl);
-  } catch {
-    return new ActionError({ code: 'invalid_input', message: 'invalid request URL', retryable: false });
+/** The origins one scheme's credential may reach; `admit` parses a URL and refuses any other origin. */
+export class CredentialScope {
+  private readonly origins: readonly string[];
+  private readonly rules: OriginRule[];
+
+  constructor(scheme: Exclude<AuthScheme, { type: 'none' }>) {
+    const origins: unknown = scheme.origins;
+    if (!Array.isArray(origins) || origins.length === 0) {
+      throw new ActionError({
+        code: 'invalid_input',
+        message: `a ${scheme.type} scheme must declare the origins its credential may reach, e.g. origins: ['https://api.example.com']`,
+        retryable: false,
+      });
+    }
+    this.origins = origins as string[];
+    this.rules = this.origins.map(toRule);
   }
-  if (rules.some((rule) => allows(rule, target))) return null;
-  return new ActionError({
-    code: 'credential_scope',
-    message: `refusing to send this connection's credential to ${target.origin} — it is only sent to ${origins.join(', ')}`,
-    retryable: false,
-  });
+
+  /** The parsed URL to send, or `credential_scope` when it is outside the declared origins. */
+  admit(rawUrl: string): URL {
+    let target: URL;
+    try {
+      target = new URL(rawUrl);
+    } catch {
+      throw new ActionError({ code: 'invalid_input', message: 'invalid request URL', retryable: false });
+    }
+    if (!this.rules.some((rule) => allows(rule, target))) {
+      throw new ActionError({
+        code: 'credential_scope',
+        message: `refusing to send this connection's credential to ${target.origin} — it is only sent to ${this.origins.join(', ')}`,
+        retryable: false,
+      });
+    }
+    return target;
+  }
 }
 
-/** Wrap `transport` so a request outside the scheme's declared origins fails before it is sent. */
+/** Wrap `transport` so a request outside the scheme's origins fails before it is sent, and the checked URL is the one sent. */
 export function scopeCredential(scheme: AuthScheme, transport: Transport): Transport {
   if (scheme.type === 'none') return transport;
-  const { origins } = scheme;
-  const rules = origins.map(toRule);
+  const scope = new CredentialScope(scheme);
   return {
     kind: transport.kind,
-    send(request: NormalizedRequest): Promise<NormalizedResponse> {
-      const refusal = outOfScope(rules, origins, request.url);
-      return refusal ? Promise.reject(refusal) : transport.send(request);
+    async send(request: NormalizedRequest): Promise<NormalizedResponse> {
+      return transport.send({ ...request, url: scope.admit(request.url).href });
     },
   };
+}
+
+/** Re-wrap `auth` so whatever transport it carries only reaches the origins `scheme` declares. */
+export function scopeHandle(scheme: AuthScheme, auth: AuthHandle): AuthHandle {
+  if (scheme.type === 'none') return auth;
+  return createAuthHandle(auth.scheme, scopeCredential(scheme, transportOf(auth)));
 }

@@ -2,6 +2,7 @@ import type { AuthHandle, AuthScheme } from './auth';
 import { type ManifestEntry, toManifestEntry } from './catalog';
 import { ActionError } from './errors';
 import { HttpClient } from './http/client';
+import { scopeHandle } from './http/credential-scope';
 import type { JsonValue } from './http/types';
 import { parseProps, type PropsSchema, type PropsValue } from './props';
 
@@ -201,7 +202,7 @@ function buildPollingTrigger<TProps extends PropsSchema, TItem>(
       const http = input.http ?? new HttpClient();
       const lastPolledAt = await input.store.get<string>('lastPolledAt');
       const items = await def.poll({
-        auth: input.auth,
+        auth: scopeHandle(def.auth, input.auth),
         props,
         http,
         store: input.store,
@@ -239,7 +240,7 @@ function buildWebhookTrigger<TProps extends PropsSchema, TItem>(
       const props = parseProps(def.props, input.props);
       const http = input.http ?? new HttpClient();
       const registration = await def.onEnable({
-        auth: input.auth,
+        auth: scopeHandle(def.auth, input.auth),
         props,
         http,
         store: input.store,
@@ -253,7 +254,7 @@ function buildWebhookTrigger<TProps extends PropsSchema, TItem>(
       const props = parseProps(def.props, input.props);
       const http = input.http ?? new HttpClient();
       await def.onDisable({
-        auth: input.auth,
+        auth: scopeHandle(def.auth, input.auth),
         props,
         http,
         store: input.store,
@@ -280,7 +281,7 @@ function buildWebhookTrigger<TProps extends PropsSchema, TItem>(
       const props = parseProps(def.props, input.props);
       const http = input.http ?? new HttpClient();
       const events = await def.onRequest({
-        auth: input.auth,
+        auth: scopeHandle(def.auth, input.auth),
         props,
         http,
         store: input.store,

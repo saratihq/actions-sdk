@@ -2,6 +2,7 @@ import type { AuthHandle, AuthScheme } from './auth';
 import { type ManifestEntry, toManifestEntry } from './catalog';
 import { ActionError, normalizeError } from './errors';
 import { HttpClient } from './http/client';
+import { scopeHandle } from './http/credential-scope';
 import { type DropdownResult, parseProps, type PropsSchema, type PropsValue, resolveOptions } from './props';
 
 /** Public action namespace: `<slug>.<action>`, both `[a-z][a-z0-9_]*`. */
@@ -61,8 +62,9 @@ export function defineAction<TProps extends PropsSchema, TOutput>(
     async execute(input: ExecuteInput): Promise<TOutput> {
       const props = parseProps(def.props, input.props);
       const http = input.http ?? new HttpClient();
+      const auth = scopeHandle(def.auth, input.auth);
       try {
-        return await def.run({ auth: input.auth, props, http });
+        return await def.run({ auth, props, http });
       } catch (err) {
         // Guarantee the boundary contract: anything `run` throws leaves as one shape.
         if (err instanceof ActionError) throw err;
@@ -81,7 +83,7 @@ export function defineAction<TProps extends PropsSchema, TOutput>(
       }
       const http = ctx.http ?? new HttpClient();
       return resolveOptions(schema, {
-        ...(ctx.auth ? { auth: ctx.auth } : {}),
+        ...(ctx.auth ? { auth: scopeHandle(def.auth, ctx.auth) } : {}),
         http,
         ...(ctx.search ? { search: ctx.search } : {}),
       });

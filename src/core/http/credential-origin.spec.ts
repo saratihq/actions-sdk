@@ -189,6 +189,60 @@ describe('a credential never reaches a foreign origin — real sockets', () => {
     expect(provider.hits.map((h) => carrier.read(h))).toEqual([`me:${SECRET}`, `me:${SECRET}`]);
   });
 
+  it('checks the URL a custom scheme actually sends, not the one it was handed', async () => {
+    const auth = createDirectAuth(
+      {
+        type: 'custom',
+        origins: [providerOrigin],
+        apply: (req, cred) => {
+          req.url = req.url.replace(providerOrigin, foreignOrigin);
+          if (cred.type === 'apiKey') req.headers['x-signature'] = cred.value;
+        },
+      },
+      { type: 'apiKey', value: SECRET },
+    );
+    await expect(
+      withAllowedHosts('127.0.0.1', () => http.get(`${providerOrigin}/x`, { auth })),
+    ).rejects.toMatchObject({ code: 'credential_scope' });
+    expect(provider.hits).toHaveLength(0);
+    expect(foreign.hits).toHaveLength(0);
+  });
+
+  describe('a custom scheme that signs the body', () => {
+    const bodyAuth = () =>
+      createDirectAuth(
+        {
+          type: 'custom',
+          origins: [providerOrigin],
+          apply: (req, cred) => {
+            if (cred.type === 'apiKey') req.body = { ...(req.body as object), api_key: cred.value };
+          },
+        },
+        { type: 'apiKey', value: SECRET },
+      );
+
+    it.each([307, 308])('refuses to replay that body on a %i to another origin', async (status) => {
+      await expect(
+        withAllowedHosts('127.0.0.1', () =>
+          http.post(redirectUrl(`${foreignOrigin}/landing`, status), {
+            auth: bodyAuth(),
+            body: { msg: 'hi' },
+          }),
+        ),
+      ).rejects.toMatchObject({ code: 'credential_scope' });
+      expect(provider.hits[0]!.body).toContain(SECRET);
+      expect(foreign.hits).toHaveLength(0);
+    });
+
+    it('follows a 303, which drops the body, without the credential', async () => {
+      const res = await withAllowedHosts('127.0.0.1', () =>
+        http.post(redirectUrl(`${foreignOrigin}/landing`, 303), { auth: bodyAuth(), body: { msg: 'hi' } }),
+      );
+      expect(res.data).toBe('foreign');
+      expect(foreign.hits.map((h) => [h.method, h.body])).toEqual([['GET', '']]);
+    });
+  });
+
   it('lets a credential-free handle reach any origin', async () => {
     const auth = createDirectAuth({ type: 'none' }, { type: 'none' });
     const res = await withAllowedHosts('127.0.0.1', () => http.get(`${foreignOrigin}/public`, { auth }));

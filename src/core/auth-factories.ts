@@ -14,10 +14,7 @@ export function createDirectAuth(
     credential,
     ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}),
   });
-  return createAuthHandle(
-    scheme.type,
-    credential.type === 'none' ? transport : scopeCredential(scheme, transport),
-  );
+  return createAuthHandle(scheme.type, transport);
 }
 
 /** Build a handle over a host-supplied {@link Transport} — the managed rail, where the SDK holds no provider secret. */

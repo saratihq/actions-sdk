@@ -9,7 +9,12 @@ import { shortText } from '../../core/props';
 /** HTTP Basic (`email:apiToken`) on the direct transport, OAuth2 bearer on managed — the transport picks. */
 export const jiraAuth: BasicScheme = {
   type: 'basic',
-  origins: ['https://api.atlassian.com', 'https://*.atlassian.net'],
+  origins: [
+    'https://api.atlassian.com',
+    'https://*.atlassian.net',
+    'https://*.jira.com',
+    'https://*.atlassian-us-gov-mod.net',
+  ],
 };
 
 const API_PATH = '/rest/api/3';
@@ -85,7 +90,7 @@ export function instanceUrlProp() {
   return shortText<false>({
     label: 'Instance URL',
     description:
-      'Your Jira site, e.g. https://your-domain.atlassian.net. Required for a direct/BYO connection; ignored on a managed connection (resolved from the token).',
+      'Your Jira Cloud site, e.g. https://your-domain.atlassian.net (or .jira.com; Government Cloud: https://your-site.atlassian-us-gov-mod.net/jira). Required for a direct/BYO connection; ignored on a managed connection (resolved from the token).',
     required: false,
   });
 }

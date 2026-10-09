@@ -124,10 +124,12 @@ const CASES: Record<string, Case> = {
 };
 
 /** The provider's own origin answers from `provider`; any other URL rides the real guarded hop to a real socket. */
-function authFor(c: Case, foreign: string): AuthHandle {
+function authFor(c: Case, foreign: string, answered: string[]): AuthHandle {
   const fetchImpl: FetchLike = (input, init) => {
     const canned = c.provider(new URL(String(input)), foreign);
-    return canned ? Promise.resolve(canned) : guardedFetch(input, init);
+    if (!canned) return guardedFetch(input, init);
+    answered.push(String(input));
+    return Promise.resolve(canned);
   };
   return createDirectAuth(c.scheme, c.credential, { fetchImpl });
 }
@@ -144,10 +146,12 @@ describe('a connection credential never reaches an origin its scheme does not de
   afterEach(() => foreign.close());
 
   it.each(Object.entries(CASES))('%s is refused before the foreign server is dialled', async (_label, c) => {
+    const answered: string[] = [];
     await expect(
-      withAllowedHosts('127.0.0.1', () => c.run(authFor(c, foreignOrigin), foreignOrigin)),
-    ).rejects.toMatchObject({ code: 'credential_scope' });
+      withAllowedHosts('127.0.0.1', () => c.run(authFor(c, foreignOrigin, answered), foreignOrigin)),
+    ).rejects.toMatchObject({ code: 'credential_scope', message: expect.stringContaining(foreignOrigin) });
     expect(foreign.hits).toHaveLength(0);
+    if (c.provider !== nothing) expect(answered.length).toBeGreaterThan(0);
   });
 });
 
@@ -196,5 +200,64 @@ describe('host-template inputs cannot move the credential to another host', () =
       'https://acme.zendesk.com',
       'https://us19.api.mailchimp.com',
     ]);
+  });
+});
+
+describe('instance URLs on each vendor-documented cloud domain are reached; any other host is refused', () => {
+  const recorder = (answer: (url: URL) => FetchLikeResponse) => {
+    const urls: string[] = [];
+    const fetchImpl: FetchLike = (input) => {
+      urls.push(String(input));
+      return Promise.resolve(answer(new URL(String(input))));
+    };
+    return { urls, fetchImpl };
+  };
+
+  it.each([
+    ['https://acme.atlassian.net', true],
+    ['https://acme.jira.com', true],
+    ['https://acme.atlassian-us-gov-mod.net/jira', true],
+    ['http://acme.atlassian.net', false],
+    ['https://acme.atlassian.net.evil.com', false],
+    ['https://jira.acme-corp.example', false],
+  ] as const)('jira instanceUrl %s → reached: %s', async (instanceUrl, reached) => {
+    const { urls, fetchImpl } = recorder((url) =>
+      url.hostname === 'api.atlassian.com' ? fakeResponse(401, '') : json({ id: '1', key: 'ENG-1' }),
+    );
+    const run = getIssue.execute({
+      auth: createDirectAuth(jiraAuth, basic, { fetchImpl }),
+      props: { instanceUrl, issueIdOrKey: 'ENG-1' },
+    });
+    if (reached) {
+      await expect(run).resolves.toMatchObject({ key: 'ENG-1' });
+      expect(urls[1]).toBe(`${instanceUrl}/rest/api/3/issue/ENG-1`);
+    } else {
+      await expect(run).rejects.toMatchObject({ code: 'credential_scope' });
+      expect(urls.map((u) => new URL(u).hostname)).toEqual(['api.atlassian.com']);
+    }
+  });
+
+  it.each([
+    ['https://acme.my.salesforce.com', true],
+    ['https://acme--uat.sandbox.my.salesforce.com', true],
+    ['https://acme.my.salesforce.mil', true],
+    ['https://acme.my.sfcrmproducts.cn', true],
+    ['https://na139.salesforce.com', false],
+    ['https://acme.my.site.com', false],
+    ['https://acme.lightning.force.com', false],
+    ['https://acme.my.salesforce.com.evil.com', false],
+  ] as const)('salesforce instanceUrl %s → reached: %s', async (instanceUrl, reached) => {
+    const { urls, fetchImpl } = recorder(() => json({ totalSize: 0, done: true, records: [] }));
+    const run = runQuery.execute({
+      auth: createDirectAuth(salesforceAuth, bearer, { fetchImpl }),
+      props: { instanceUrl, query: 'SELECT Id FROM Account' },
+    });
+    if (reached) {
+      await expect(run).resolves.toMatchObject({ done: true });
+      expect(new URL(urls[0]!).origin).toBe(instanceUrl);
+    } else {
+      await expect(run).rejects.toMatchObject({ code: 'credential_scope' });
+      expect(urls).toHaveLength(0);
+    }
   });
 });

@@ -76,10 +76,21 @@ const githubToken: ApiKeyScheme = {
 ```
 
 An entry is an exact origin, or `https://*.example.com` for any subdomain when the host comes from
-user input (a Zendesk subdomain, a Salesforce instance). A request to any other origin — a typo, a
+user input (a Zendesk subdomain, a Salesforce instance). List every origin the action calls, including
+hosts a provider hands back (Slack's `files.slack.com`). A request to any other origin — a typo, a
 provider-supplied next-page URL, an attacker-chosen host — fails with `credential_scope` before it
-is sent, and a redirect never carries the credential to a different origin. When user input becomes
-part of a hostname, pass it through `hostLabel` so a value like `evil.com#` can't escape the template.
+is sent. On a direct connection a redirect never carries the credential to another origin, and a
+`custom` scheme's body is never replayed to one. When user input becomes part of a hostname, pass it
+through `hostLabel` so a value like `evil.com#` can't escape the template.
+
+### Upgrading to 0.2
+
+`origins` is now required on every `oauth2`, `apiKey`, `basic` and `custom` scheme. Its type is a
+non-empty tuple, so write the list inline (or `as const`); a plain `string[]` won't type-check. A
+scheme without it fails with `invalid_input` when its handle is built. Requests outside the list
+fail with the new `credential_scope` error code. An action enforces its own `origins` whatever handle
+it is given, so a spec that stubs the transport still fails on a URL outside them.
+
 
 Use `none` for actions that need no credential (the utility actions).
 

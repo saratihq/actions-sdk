@@ -2,6 +2,7 @@ import { isNativeError } from 'node:util/types';
 
 import type { AuthScheme, DirectCredential } from '../auth';
 import { ActionError, transportFailure } from '../errors';
+import { CredentialScope } from './credential-scope';
 import { encodeForm } from './form';
 import { guardedFetch } from './guarded-fetch';
 import { encodeMultipart } from './multipart';
@@ -28,17 +29,24 @@ export class DirectTransport implements Transport {
   private readonly scheme: AuthScheme;
   private readonly credential: DirectCredential;
   private readonly fetchImpl: FetchLike;
+  private readonly scope: CredentialScope | null;
 
   constructor(options: DirectTransportOptions) {
     this.scheme = options.scheme;
     this.credential = options.credential;
     this.fetchImpl = options.fetchImpl ?? guardedFetch;
+    this.scope =
+      options.scheme.type === 'none' || options.credential.type === 'none'
+        ? null
+        : new CredentialScope(options.scheme);
   }
 
   async send(request: NormalizedRequest): Promise<NormalizedResponse> {
     const prepared = this.applyAuth(request);
+    if (this.scope) prepared.url = this.scope.admit(prepared.url).href;
     const credentialHeaders = changedHeaders(request.headers, prepared.headers);
     const credentialParams = changedParams(request.url, prepared.url);
+    const credentialBody = this.scheme.type === 'custom' && prepared.body !== undefined;
     const wireBody = this.encodeBody(prepared);
     const res = await this.fetchImpl(prepared.url, {
       method: prepared.method,
@@ -47,6 +55,7 @@ export class DirectTransport implements Transport {
       ...(prepared.signal ? { signal: prepared.signal } : {}),
       ...(credentialHeaders.length > 0 ? { credentialHeaders } : {}),
       ...(credentialParams.length > 0 ? { credentialParams } : {}),
+      ...(credentialBody ? { credentialBody } : {}),
     });
 
     const headers: Record<string, string> = {};

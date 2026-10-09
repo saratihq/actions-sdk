@@ -38,6 +38,35 @@ const okResponse = (data: unknown): NormalizedResponse => ({ status: 200, header
 const readableQuery = (request: NormalizedRequest): string =>
   decodeURIComponent(request.url).replace(/\+/g, ' ');
 
+/** A Graph `/me/messages` stand-in: ascending by receivedDateTime, honouring `ge` and paging by `$skiptoken`. */
+function fakeGraph(count: number) {
+  const timeOf = (i: number): string =>
+    new Date(Date.UTC(2026, 9, 1, 1, 0, 0) + i * 1000).toISOString().replace('.000', '');
+  const messages = Array.from({ length: count }, (_, i) => ({ id: `msg-${i}`, receivedDateTime: timeOf(i) }));
+  const transport = new FakeTransport((request) => {
+    const url = new URL(request.url);
+    const top = Number(url.searchParams.get('$top') ?? 100);
+    const skip = url.searchParams.get('$skiptoken');
+    const since = url.searchParams.get('$filter')?.replace('receivedDateTime ge ', '') ?? '';
+    const start =
+      skip !== null
+        ? Number(skip)
+        : messages.findIndex((m) => Date.parse(m.receivedDateTime) >= Date.parse(since));
+    const from = start === -1 ? messages.length : start;
+    const value = messages.slice(from, from + top);
+    const next =
+      from + top < messages.length
+        ? { '@odata.nextLink': `${url.origin}${url.pathname}?$top=${top}&$skiptoken=${from + top}` }
+        : {};
+    return okResponse({ value, ...next });
+  });
+  return Object.assign(transport, {
+    ids: messages.map((m) => m.id),
+    newest: timeOf(count - 1),
+    timeOf,
+  });
+}
+
 /** Seed a watermark so the poll runs its real (non-baseline) path. */
 async function withWatermark(store: MemoryStore): Promise<void> {
   await store.set('lastPolledAt', '2026-07-20T18:00:00.000Z');
@@ -85,9 +114,9 @@ describe('outlook.new_email polling trigger', () => {
 
     const q = readableQuery(transport.requests[0]!);
     expect(transport.requests[0]!.url).toContain('https://graph.microsoft.com/v1.0/me/messages');
-    expect(q).toContain('$orderby=receivedDateTime desc');
+    expect(q).toContain('$orderby=receivedDateTime asc');
     expect(q).toContain('$select=');
-    expect(q).toContain('$top=50');
+    expect(q).toContain('$top=100');
     // `ge`, not a strict `gt` — the boundary/in-flight message must not be skipped.
     expect(q).toContain('$filter=receivedDateTime ge ');
     expect(q).not.toContain('receivedDateTime gt ');
@@ -113,19 +142,57 @@ describe('outlook.new_email polling trigger', () => {
     expect(events.map((e) => e.id)).toEqual(['AAMkAGUAAAwTW09AAA=', 'AAMkAGUAAAwTW10BBB=']);
   });
 
-  it('stops a runaway @odata.nextLink at the page cap instead of looping forever', async () => {
+  it('drains a backlog larger than one poll across polls, each message exactly once, never wedging', async () => {
+    const graph = fakeGraph(3000);
+    const store = new MemoryStore();
+    await store.set('lastPolledAt', '2026-10-01T00:00:00.000Z');
+    const delivered: string[] = [];
+    let polls = 0;
+    for (; polls < 20; polls += 1) {
+      const { events } = await newEmail.runPoll({ auth: stubAuth(graph), props: {}, store });
+      if (events.length === 0) break;
+      delivered.push(...events.map((e) => e.id));
+    }
+    expect(delivered).toEqual(graph.ids);
+    expect(polls).toBe(7);
+    expect(await store.get('cursor')).toBe(graph.newest);
+    expect(await store.get('draining')).toBe(false);
+  });
+
+  it('resumes a capped poll exactly at its cursor, then widens by the overlap once caught up', async () => {
+    const graph = fakeGraph(700);
+    const store = new MemoryStore();
+    await store.set('lastPolledAt', '2026-10-01T00:00:00.000Z');
+    await newEmail.runPoll({ auth: stubAuth(graph), props: {}, store });
+    await newEmail.runPoll({ auth: stubAuth(graph), props: {}, store });
+    await newEmail.runPoll({ auth: stubAuth(graph), props: {}, store });
+    const filters = graph.requests
+      .filter((r) => !r.url.includes('$skiptoken'))
+      .map((r) => new URL(r.url).searchParams.get('$filter'));
+    expect(filters).toEqual([
+      'receivedDateTime ge 2026-09-30T23:58:00.000Z',
+      `receivedDateTime ge ${graph.timeOf(499)}`,
+      `receivedDateTime ge ${new Date(Date.parse(graph.newest) - 120_000).toISOString()}`,
+    ]);
+  });
+
+  it('bounds a runaway @odata.nextLink per poll and still moves the cursor', async () => {
+    const page = Array.from({ length: 100 }, (_, i) => ({
+      id: `m${i}`,
+      receivedDateTime: new Date(Date.UTC(2026, 9, 1, 0, 0, i)).toISOString().replace('.000', ''),
+    }));
     const transport = new FakeTransport(() =>
       okResponse({
-        value: [MESSAGE_LATE_TASKS],
+        value: page,
         '@odata.nextLink': 'https://graph.microsoft.com/v1.0/me/messages?$skiptoken=AGAIN',
       }),
     );
     const store = new MemoryStore();
     await withWatermark(store);
-    await expect(newEmail.runPoll({ auth: stubAuth(transport), props: {}, store })).rejects.toMatchObject({
-      code: 'pagination_limit',
-    });
-    expect(transport.requests).toHaveLength(50);
+    const { events } = await newEmail.runPoll({ auth: stubAuth(transport), props: {}, store });
+    expect(transport.requests).toHaveLength(5);
+    expect(events).toHaveLength(100);
+    expect(await store.get('cursor')).toBe(page[99]!.receivedDateTime);
   });
 
   it('dedupes the id re-listed inside the overlap window across polls', async () => {

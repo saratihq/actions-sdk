@@ -35,11 +35,11 @@ describe('slack.get_file — binary download', () => {
             id: 'F123',
             name: 'diagram.png',
             mimetype: 'image/png',
-            url_private_download: 'https://files.slack.test/diagram.png',
+            url_private_download: 'https://files.slack.com/files-pri/T0001-F123/download/diagram.png',
           },
         });
       }
-      if (url.startsWith('https://files.slack.test/')) {
+      if (url.startsWith('https://files.slack.com/files-pri/')) {
         return fakeResponse(200, png, { 'content-type': 'image/png' });
       }
       throw new Error(`unexpected url ${url}`);
@@ -52,7 +52,7 @@ describe('slack.get_file — binary download', () => {
     expect(Buffer.isBuffer(out.file.data)).toBe(true);
     expect(out.file.data).toEqual(png);
     // The bearer token rode to the (different-host) download URL.
-    const download = calls.find((c) => c.url.startsWith('https://files.slack.test/'));
+    const download = calls.find((c) => c.url.startsWith('https://files.slack.com/files-pri/'));
     expect(download?.init?.headers?.['authorization']).toBe('Bearer xoxb-test-token');
   });
 
@@ -70,9 +70,9 @@ describe('slack.upload_file — multipart upload', () => {
     let uploadInit: Parameters<FetchLike>[1] | undefined;
     const { auth, http, calls } = directAuth((url, init) => {
       if (url.includes('/files.getUploadURLExternal')) {
-        return json({ ok: true, upload_url: 'https://files-upload.slack.test/u1', file_id: 'F999' });
+        return json({ ok: true, upload_url: 'https://files.slack.com/upload/v1/u1', file_id: 'F999' });
       }
-      if (url.startsWith('https://files-upload.slack.test/')) {
+      if (url.startsWith('https://files.slack.com/upload/v1/')) {
         uploadInit = init;
         return fakeResponse(200, 'OK', { 'content-type': 'text/plain' });
       }

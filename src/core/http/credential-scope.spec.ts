@@ -25,7 +25,24 @@ describe('credential scope — which URLs a scheme lets its credential ride', ()
   ] as const)('%s admits %s', async (origin, url) => {
     const { send, transport } = scopedTo([origin]);
     await send(url);
-    expect(transport.requests.map((r) => r.url)).toEqual([url]);
+    expect(transport.requests.map((r) => r.url)).toEqual([new URL(url).href]);
+  });
+
+  it('hands the transport the URL it checked, so no other parser can read a different host', async () => {
+    const { send, transport } = scopedTo(['https://*.my.salesforce.com']);
+    await send('https://acme.my.salesforce.com\\@attacker.example/services/data');
+    expect(transport.requests.map((r) => r.url)).toEqual([
+      'https://acme.my.salesforce.com/@attacker.example/services/data',
+    ]);
+  });
+
+  it('refuses to build a handle for a credentialed scheme that declares no origins', () => {
+    expect(() => scopedTo(undefined as unknown as CredentialOrigins)).toThrow(
+      expect.objectContaining({
+        code: 'invalid_input',
+        message: expect.stringContaining('must declare the origins'),
+      }),
+    );
   });
 
   it.each([

@@ -6,8 +6,10 @@ import { GRAPH_ME_BASE, MESSAGE_SELECT, odataNextLink, type OutlookMessage, outl
 /** Polling trigger — fires once per new message in the connected Outlook mailbox, deduped by message id. */
 export const OUTLOOK_NEW_EMAIL_TYPE = 'outlook.new_email';
 
-/** Page size for the list call — the window is paged in full via `@odata.nextLink`. */
-const TOP = 50;
+/** Page size for the list call; Graph allows up to 1000. */
+const TOP = 100;
+/** Messages emitted per poll — half the trigger's dedupe memory; a larger backlog drains over later polls. */
+const MAX_PER_POLL = 500;
 /** Overlap on the watermark so a boundary message is never skipped; id-dedupe suppresses the re-list. */
 const OVERLAP_SECONDS = 120;
 
@@ -76,10 +78,12 @@ export const newEmail = defineTrigger({
     conversationId: 'AAQkAGUAAAwTW09AAA=',
     to: ['me@example.com'],
   },
-  async poll({ auth, http, lastPolledAt }): Promise<OutlookNewEmailEvent[]> {
+  async poll({ auth, http, store, lastPolledAt }): Promise<OutlookNewEmailEvent[]> {
     // First poll ever: baseline the watermark and emit nothing, so the existing mailbox isn't backfilled.
     if (!lastPolledAt) return [];
 
+    const cursor = (await store.get<string>('cursor')) ?? lastPolledAt;
+    const draining = (await store.get<boolean>('draining')) === true;
     // $filter and $orderby must share receivedDateTime in the same order, or Graph 400s with InefficientFilter.
     const messages = await paginate<OutlookMessage>({
       http,
@@ -87,22 +91,30 @@ export const newEmail = defineTrigger({
       url: `${GRAPH_ME_BASE}/messages`,
       query: {
         $select: MESSAGE_SELECT,
-        $orderby: 'receivedDateTime desc',
+        $orderby: 'receivedDateTime asc',
         $top: TOP,
-        $filter: `receivedDateTime ge ${sinceWithOverlap(lastPolledAt)}`,
+        $filter: `receivedDateTime ge ${draining ? cursor : sinceWithOverlap(cursor)}`,
       },
       extractItems: (res) => (res.data as MessagesListResponse).value ?? [],
       nextPage: odataNextLink,
+      maxItems: MAX_PER_POLL,
     });
+
+    const newest = messages.reduce<string | undefined>(
+      (max, m) => (m.receivedDateTime && (!max || m.receivedDateTime > max) ? m.receivedDateTime : max),
+      undefined,
+    );
+    if (newest) await store.set('cursor', newest);
+    await store.set('draining', messages.length >= MAX_PER_POLL);
     return messages.map(toEvent).filter((event): event is OutlookNewEmailEvent => event !== null);
   },
   /** Dedupe on the immutable message id. */
   dedupeKey: (event): string => event.id,
 });
 
-/** The `receivedDateTime ge` lower bound: the last-poll instant less the overlap, as ISO 8601 UTC. */
-function sinceWithOverlap(lastPolledAt: string): string {
-  const ms = new Date(lastPolledAt).getTime();
+/** The `receivedDateTime ge` lower bound: the cursor less the overlap, as ISO 8601 UTC. */
+function sinceWithOverlap(cursor: string): string {
+  const ms = new Date(cursor).getTime();
   const base = Number.isNaN(ms) ? Date.now() : ms;
   return new Date(base - OVERLAP_SECONDS * 1000).toISOString();
 }

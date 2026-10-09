@@ -209,6 +209,13 @@ export const guardedFetch: FetchLike = async (input, init = {}) => {
     const next = redirectTarget(location, url);
     leftOrigin ||= next.origin !== url.origin;
     request = followUp(request, res.status, leftOrigin ? offOriginDropped : null);
+    if (leftOrigin && init.credentialBody && request.body !== undefined) {
+      throw new ActionError({
+        code: 'credential_scope',
+        message: `refusing to replay a credential-bearing body to ${next.origin} on a ${res.status} redirect`,
+        retryable: false,
+      });
+    }
     if (leftOrigin) withoutParams(next, init.credentialParams ?? []);
     from = url.origin;
     url = next;

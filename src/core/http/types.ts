@@ -95,6 +95,8 @@ export type FetchLike = (
     credentialHeaders?: readonly string[];
     /** Query params carrying the credential; stripped from every redirect hop once it leaves the origin. */
     credentialParams?: readonly string[];
+    /** The body may carry the credential; a redirect that would replay it to another origin is refused. */
+    credentialBody?: boolean;
   },
 ) => Promise<FetchLikeResponse>;
 
