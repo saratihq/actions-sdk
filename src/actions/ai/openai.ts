@@ -2,7 +2,13 @@ import type { ApiKeyScheme } from '../../core/auth';
 import { chatCompletionBody, extractChatCompletionText, makeGenerateText, usageField } from './generate-text';
 
 /** OpenAI authenticates with a bearer key in the `Authorization` header. */
-const openaiAuth: ApiKeyScheme = { type: 'apiKey', in: 'header', name: 'Authorization', prefix: 'Bearer ' };
+export const openaiAuth: ApiKeyScheme = {
+  type: 'apiKey',
+  origins: ['https://api.openai.com'],
+  in: 'header',
+  name: 'Authorization',
+  prefix: 'Bearer ',
+};
 
 /** `openai.generate_text` — generate text with an OpenAI chat model. */
 export const openaiGenerateText = makeGenerateText({

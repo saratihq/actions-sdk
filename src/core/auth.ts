@@ -3,9 +3,13 @@ import type { NormalizedRequest, Transport } from './http/types';
 
 export type AuthSchemeType = 'oauth2' | 'apiKey' | 'basic' | 'none' | 'custom';
 
+/** Where a scheme's credential may be sent: exact origins (`https://slack.com`) or `https://*.zendesk.com` for any subdomain. */
+export type CredentialOrigins = readonly [string, ...string[]];
+
 /** OAuth2 — the credential is a bearer access token attached as `Authorization: Bearer …`. */
 export interface OAuth2Scheme {
   type: 'oauth2';
+  origins: CredentialOrigins;
   /** Connect-UI metadata; not needed to attach the bearer token at runtime. */
   authUrl?: string;
   tokenUrl?: string;
@@ -15,6 +19,7 @@ export interface OAuth2Scheme {
 /** API key — attached as a header or a query param, with an optional value prefix. */
 export interface ApiKeyScheme {
   type: 'apiKey';
+  origins: CredentialOrigins;
   in: 'header' | 'query';
   /** Header or query-param name, e.g. `Authorization` or `api_key`. */
   name: string;
@@ -25,6 +30,7 @@ export interface ApiKeyScheme {
 /** HTTP Basic — `Authorization: Basic base64(user:pass)`. */
 export interface BasicScheme {
   type: 'basic';
+  origins: CredentialOrigins;
 }
 
 /** No authentication (public endpoints). */
@@ -35,6 +41,7 @@ export interface NoneScheme {
 /** Escape hatch for signing schemes the declarative kinds don't cover. */
 export interface CustomScheme {
   type: 'custom';
+  origins: CredentialOrigins;
   /** Mutates the outbound request to attach the credential. Must not throw for missing creds — return unmodified. */
   apply(request: NormalizedRequest, credential: DirectCredential): void;
 }

@@ -113,6 +113,21 @@ describe('outlook.new_email polling trigger', () => {
     expect(events.map((e) => e.id)).toEqual(['AAMkAGUAAAwTW09AAA=', 'AAMkAGUAAAwTW10BBB=']);
   });
 
+  it('stops a runaway @odata.nextLink at the page cap instead of looping forever', async () => {
+    const transport = new FakeTransport(() =>
+      okResponse({
+        value: [MESSAGE_LATE_TASKS],
+        '@odata.nextLink': 'https://graph.microsoft.com/v1.0/me/messages?$skiptoken=AGAIN',
+      }),
+    );
+    const store = new MemoryStore();
+    await withWatermark(store);
+    await expect(newEmail.runPoll({ auth: stubAuth(transport), props: {}, store })).rejects.toMatchObject({
+      code: 'pagination_limit',
+    });
+    expect(transport.requests).toHaveLength(50);
+  });
+
   it('dedupes the id re-listed inside the overlap window across polls', async () => {
     const store = new MemoryStore();
     await withWatermark(store);

@@ -23,6 +23,7 @@ export {
   type AgentConversationMessage,
   type AgentModelAdapter,
   agentModelAdapters,
+  agentModelAuth,
   type AgentModelRequest,
   type AgentModelResult,
   type AgentProvider,

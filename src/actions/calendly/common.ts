@@ -11,6 +11,7 @@ export const CALENDLY_API_BASE = 'https://api.calendly.com';
 /** Calendly authenticates with a personal access token (or managed OAuth) as a Bearer credential. */
 export const calendlyAuth: ApiKeyScheme = {
   type: 'apiKey',
+  origins: ['https://api.calendly.com'],
   in: 'header',
   name: 'Authorization',
   prefix: 'Bearer ',

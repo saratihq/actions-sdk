@@ -26,10 +26,14 @@ function withoutHeaders(
   return Object.fromEntries(Object.entries(headers ?? {}).filter(([name]) => !names.has(name.toLowerCase())));
 }
 
-async function send(url: URL, init: FetchInit): Promise<Response> {
+function withoutParams(url: URL, names: readonly string[]): void {
+  for (const name of names) if (url.searchParams.has(name)) url.searchParams.delete(name);
+}
+
+async function send(url: URL, { method, headers, body, signal }: FetchInit): Promise<Response> {
   preflightTarget(url, ssrfAllowedHostsFromEnv());
   try {
-    return await fetch(url, { ...init, redirect: 'manual', dispatcher });
+    return await fetch(url, { method, headers, body, signal, redirect: 'manual', dispatcher });
   } catch (err) {
     const cause = (err as { cause?: unknown }).cause;
     throw cause instanceof ActionError ? cause : err;
@@ -58,7 +62,7 @@ function redirectTarget(location: string, from: URL): URL {
 }
 
 /** Fetch's own rewrite of a redirected request: 303 (and 301/302 after POST) becomes a body-less GET. */
-function followUp(init: FetchInit, status: number, crossOrigin: boolean): FetchInit {
+function followUp(init: FetchInit, status: number, dropped: Set<string> | null): FetchInit {
   const method = (init.method ?? 'GET').toUpperCase();
   const toGet =
     (status === 303 && method !== 'GET' && method !== 'HEAD') ||
@@ -70,15 +74,18 @@ function followUp(init: FetchInit, status: number, crossOrigin: boolean): FetchI
         ...(init.signal ? { signal: init.signal } : {}),
       }
     : init;
-  return crossOrigin
-    ? { ...next, headers: withoutHeaders(next.headers, CROSS_ORIGIN_DROPPED_HEADERS) }
-    : next;
+  return dropped ? { ...next, headers: withoutHeaders(next.headers, dropped) } : next;
 }
 
-/** The SDK's network hop: fetch, except every dialled address must be public and every redirect hop is re-guarded. */
+/** The SDK's network hop: fetch, except every dialled address must be public, every redirect hop is re-guarded, and the credential never leaves its origin. */
 export const guardedFetch: FetchLike = async (input, init = {}) => {
   let url = new URL(String(input));
   let request = init;
+  const offOriginDropped = new Set([
+    ...CROSS_ORIGIN_DROPPED_HEADERS,
+    ...(init.credentialHeaders ?? []).map((name) => name.toLowerCase()),
+  ]);
+  let leftOrigin = false;
   for (let hops = 0; ; hops += 1) {
     const res = await send(url, request);
     const location = res.headers.get('location');
@@ -92,7 +99,9 @@ export const guardedFetch: FetchLike = async (input, init = {}) => {
       });
     }
     const next = redirectTarget(location, url);
-    request = followUp(request, res.status, next.origin !== url.origin);
+    leftOrigin ||= next.origin !== url.origin;
+    request = followUp(request, res.status, leftOrigin ? offOriginDropped : null);
+    if (leftOrigin) withoutParams(next, init.credentialParams ?? []);
     url = next;
   }
 };

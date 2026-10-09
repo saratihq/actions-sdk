@@ -7,6 +7,7 @@ export const STRIPE_API_BASE = 'https://api.stripe.com/v1';
 /** Stripe's secret key rides as a Bearer token; declared as an `apiKey` header scheme so both transports run identical action code. */
 export const stripeAuth: ApiKeyScheme = {
   type: 'apiKey',
+  origins: ['https://api.stripe.com'],
   in: 'header',
   name: 'Authorization',
   prefix: 'Bearer ',

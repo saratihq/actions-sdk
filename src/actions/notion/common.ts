@@ -13,6 +13,7 @@ export const NOTION_HEADERS: Record<string, string> = { 'notion-version': '2022-
 /** Notion authenticates with an integration/OAuth token as a Bearer credential. */
 export const notionAuth: ApiKeyScheme = {
   type: 'apiKey',
+  origins: ['https://api.notion.com'],
   in: 'header',
   name: 'Authorization',
   prefix: 'Bearer ',

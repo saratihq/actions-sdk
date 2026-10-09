@@ -3,9 +3,10 @@ import { ActionError } from '../../core/errors';
 
 export const SLACK_API_BASE = 'https://slack.com/api';
 
-/** The OAuth2 scheme actions declare; connect-UI metadata only — the token is attached by the transport. */
+/** Slack's OAuth2 scheme; `files.slack.com` serves private file downloads and upload URLs. */
 export const slackOAuth: OAuth2Scheme = {
   type: 'oauth2',
+  origins: ['https://slack.com', 'https://files.slack.com'],
   authUrl: 'https://slack.com/oauth/v2/authorize',
   tokenUrl: 'https://slack.com/api/oauth.v2.access',
   scopes: ['channels:read', 'groups:read', 'chat:write'],

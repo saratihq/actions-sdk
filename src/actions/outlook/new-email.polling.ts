@@ -1,7 +1,7 @@
-import { defineTrigger } from '../../core/trigger';
-import type { HttpResponse } from '../../core/http/client';
+import { paginate } from '../../core/http/pagination';
 import type { PropsSchema } from '../../core/props';
-import { GRAPH_ME_BASE, MESSAGE_SELECT, type OutlookMessage, outlookAuth } from './common';
+import { defineTrigger } from '../../core/trigger';
+import { GRAPH_ME_BASE, MESSAGE_SELECT, odataNextLink, type OutlookMessage, outlookAuth } from './common';
 
 /** Polling trigger — fires once per new message in the connected Outlook mailbox, deduped by message id. */
 export const OUTLOOK_NEW_EMAIL_TYPE = 'outlook.new_email';
@@ -32,8 +32,6 @@ export interface OutlookNewEmailEvent {
 /** The `/me/messages` list response envelope (the fields read). */
 interface MessagesListResponse {
   value?: OutlookMessage[];
-  /** Absolute URL of the next page; absent/empty on the last page. */
-  '@odata.nextLink'?: string;
 }
 
 /** Transform a Graph message into the normalised event, or null if it has no id. */
@@ -83,30 +81,20 @@ export const newEmail = defineTrigger({
     if (!lastPolledAt) return [];
 
     // $filter and $orderby must share receivedDateTime in the same order, or Graph 400s with InefficientFilter.
-    const events: OutlookNewEmailEvent[] = [];
-    // Only the first page carries a query; later pages ride @odata.nextLink verbatim.
-    let url: string | undefined = `${GRAPH_ME_BASE}/messages`;
-    let query: Record<string, string | number> | undefined = {
-      $select: MESSAGE_SELECT,
-      $orderby: 'receivedDateTime desc',
-      $top: TOP,
-      $filter: `receivedDateTime ge ${sinceWithOverlap(lastPolledAt)}`,
-    };
-    // Page the watermark-bounded window to exhaustion so a burst larger than one page isn't truncated.
-    while (url) {
-      const res: HttpResponse<MessagesListResponse> = await http.get<MessagesListResponse>(url, {
-        auth,
-        ...(query ? { query } : {}),
-      });
-      for (const message of res.data.value ?? []) {
-        const event = toEvent(message);
-        if (event) events.push(event);
-      }
-      const next = res.data['@odata.nextLink'];
-      url = typeof next === 'string' && next.length > 0 ? next : undefined;
-      query = undefined;
-    }
-    return events;
+    const messages = await paginate<OutlookMessage>({
+      http,
+      auth,
+      url: `${GRAPH_ME_BASE}/messages`,
+      query: {
+        $select: MESSAGE_SELECT,
+        $orderby: 'receivedDateTime desc',
+        $top: TOP,
+        $filter: `receivedDateTime ge ${sinceWithOverlap(lastPolledAt)}`,
+      },
+      extractItems: (res) => (res.data as MessagesListResponse).value ?? [],
+      nextPage: odataNextLink,
+    });
+    return messages.map(toEvent).filter((event): event is OutlookNewEmailEvent => event !== null);
   },
   /** Dedupe on the immutable message id. */
   dedupeKey: (event): string => event.id,

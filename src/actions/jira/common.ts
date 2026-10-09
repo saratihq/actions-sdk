@@ -7,7 +7,10 @@ import { shortText } from '../../core/props';
 /** Shared Jira Cloud REST v3 building blocks: auth, base-URL resolution, and the ADF body shape. */
 
 /** HTTP Basic (`email:apiToken`) on the direct transport, OAuth2 bearer on managed — the transport picks. */
-export const jiraAuth: BasicScheme = { type: 'basic' };
+export const jiraAuth: BasicScheme = {
+  type: 'basic',
+  origins: ['https://api.atlassian.com', 'https://*.atlassian.net'],
+};
 
 const API_PATH = '/rest/api/3';
 

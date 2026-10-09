@@ -9,6 +9,7 @@ export const GRAPH_ME_BASE = 'https://graph.microsoft.com/v1.0/me';
 /** Outlook authenticates with an OAuth2 bearer access token (Microsoft identity), attached by the transport. */
 export const outlookAuth: OAuth2Scheme = {
   type: 'oauth2',
+  origins: ['https://graph.microsoft.com'],
   scopes: ['Mail.Read', 'Mail.Send', 'Mail.ReadWrite'],
 };
 

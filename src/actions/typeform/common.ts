@@ -8,6 +8,7 @@ export const TYPEFORM_API_BASE = 'https://api.typeform.com';
 /** Bearer auth; the `webhooks:*` scopes are required or the `new_response` trigger's registration 403s. */
 export const typeformAuth: OAuth2Scheme = {
   type: 'oauth2',
+  origins: ['https://api.typeform.com'],
   scopes: ['forms:read', 'responses:read', 'webhooks:write', 'webhooks:read'],
 };
 

@@ -17,6 +17,7 @@ export {
   type AuthScheme,
   type AuthSchemeType,
   type BasicScheme,
+  type CredentialOrigins,
   type CustomScheme,
   type DirectCredential,
   type NoneScheme,
@@ -70,6 +71,7 @@ export { backoffDelay, DEFAULT_RETRY_POLICY, parseRetryAfter, type RetryPolicy }
 // SSRF guard — `guardedFetch` is the direct transport's network hop; `guardUserUrl` checks a URL ahead of time.
 export { guardedFetch } from './core/http/guarded-fetch';
 export { assertPublicUrl, guardUserUrl, isBlockedIp, ssrfAllowedHostsFromEnv } from './core/http/ssrf';
+export { hostLabel } from './core/http/host-label';
 
 // Props — typed prop kinds + boundary validation.
 export {
@@ -140,6 +142,7 @@ export {
   type AgentConversationMessage,
   type AgentModelAdapter,
   agentModelAdapters,
+  agentModelAuth,
   type AgentModelRequest,
   type AgentModelResult,
   type AgentProvider,

@@ -11,7 +11,7 @@ describe('DirectTransport — credential injection', () => {
       fakeResponse(200, '{"ok":true}', { 'content-type': 'application/json' }),
     );
     const t = new DirectTransport({
-      scheme: { type: 'oauth2' },
+      scheme: { type: 'oauth2', origins: ['https://api.test'] },
       credential: { type: 'bearer', token: 'T0K' },
       fetchImpl,
     });
@@ -20,7 +20,13 @@ describe('DirectTransport — credential injection', () => {
   });
 
   it('attaches an apiKey header with a prefix', async () => {
-    const scheme: AuthScheme = { type: 'apiKey', in: 'header', name: 'Authorization', prefix: 'token ' };
+    const scheme: AuthScheme = {
+      type: 'apiKey',
+      origins: ['https://api.test'],
+      in: 'header',
+      name: 'Authorization',
+      prefix: 'token ',
+    };
     const fetchImpl = fakeFetch(() => fakeResponse(200, '{}', { 'content-type': 'application/json' }));
     const t = new DirectTransport({ scheme, credential: { type: 'apiKey', value: 'ABC' }, fetchImpl });
     await t.send(baseReq);
@@ -28,7 +34,12 @@ describe('DirectTransport — credential injection', () => {
   });
 
   it('attaches an apiKey in the query string', async () => {
-    const scheme: AuthScheme = { type: 'apiKey', in: 'query', name: 'api_key' };
+    const scheme: AuthScheme = {
+      type: 'apiKey',
+      origins: ['https://api.test'],
+      in: 'query',
+      name: 'api_key',
+    };
     const fetchImpl = fakeFetch(() => fakeResponse(200, '{}', { 'content-type': 'application/json' }));
     const t = new DirectTransport({ scheme, credential: { type: 'apiKey', value: 'K' }, fetchImpl });
     await t.send(baseReq);
@@ -38,7 +49,7 @@ describe('DirectTransport — credential injection', () => {
   it('encodes HTTP Basic', async () => {
     const fetchImpl = fakeFetch(() => fakeResponse(200, '{}', { 'content-type': 'application/json' }));
     const t = new DirectTransport({
-      scheme: { type: 'basic' },
+      scheme: { type: 'basic', origins: ['https://api.test'] },
       credential: { type: 'basic', username: 'u', password: 'p' },
       fetchImpl,
     });
@@ -60,6 +71,7 @@ describe('DirectTransport — credential injection', () => {
     const fetchImpl = fakeFetch(() => fakeResponse(200, '{}', { 'content-type': 'application/json' }));
     const scheme: AuthScheme = {
       type: 'custom',
+      origins: ['https://api.test'],
       apply: (req, cred) => {
         if (cred.type === 'apiKey') req.headers['x-signature'] = `sig-${cred.value}`;
       },
@@ -72,7 +84,7 @@ describe('DirectTransport — credential injection', () => {
   it('does not mutate the caller request object', async () => {
     const fetchImpl = fakeFetch(() => fakeResponse(200, '{}', { 'content-type': 'application/json' }));
     const t = new DirectTransport({
-      scheme: { type: 'oauth2' },
+      scheme: { type: 'oauth2', origins: ['https://api.test'] },
       credential: { type: 'bearer', token: 'T' },
       fetchImpl,
     });

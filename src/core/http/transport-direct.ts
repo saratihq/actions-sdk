@@ -35,12 +35,16 @@ export class DirectTransport implements Transport {
 
   async send(request: NormalizedRequest): Promise<NormalizedResponse> {
     const prepared = this.applyAuth(request);
+    const credentialHeaders = changedHeaders(request.headers, prepared.headers);
+    const credentialParams = changedParams(request.url, prepared.url);
     const wireBody = this.encodeBody(prepared);
     const res = await this.fetchImpl(prepared.url, {
       method: prepared.method,
       headers: prepared.headers,
       ...(wireBody !== undefined ? { body: wireBody } : {}),
       ...(prepared.signal ? { signal: prepared.signal } : {}),
+      ...(credentialHeaders.length > 0 ? { credentialHeaders } : {}),
+      ...(credentialParams.length > 0 ? { credentialParams } : {}),
     });
 
     const headers: Record<string, string> = {};
@@ -114,6 +118,19 @@ export class DirectTransport implements Transport {
     }
     return prepared;
   }
+}
+
+function changedHeaders(before: Record<string, string>, after: Record<string, string>): string[] {
+  return Object.keys(after).filter((name) => after[name] !== before[name]);
+}
+
+function changedParams(before: string, after: string): string[] {
+  if (before === after) return [];
+  const was = new URL(before).searchParams;
+  const now = new URL(after).searchParams;
+  return [...new Set(now.keys())].filter(
+    (name) => was.getAll(name).join('\n') !== now.getAll(name).join('\n'),
+  );
 }
 
 /** Parse a response body: JSON when the content-type says so, else the raw text. */
