@@ -63,6 +63,24 @@ an opaque `AuthHandle` as `auth`. Pass `auth` to the `http` client and it inject
 request time — action code can't read the raw secret or learn where it came from. The same action
 runs with a bring-your-own credential or a managed one, unchanged.
 
+Every scheme that carries a credential declares the `origins` it may be sent to:
+
+```ts
+const githubToken: ApiKeyScheme = {
+  type: 'apiKey',
+  origins: ['https://api.github.com'],
+  in: 'header',
+  name: 'Authorization',
+  prefix: 'Bearer ',
+};
+```
+
+An entry is an exact origin, or `https://*.example.com` for any subdomain when the host comes from
+user input (a Zendesk subdomain, a Salesforce instance). A request to any other origin — a typo, a
+provider-supplied next-page URL, an attacker-chosen host — fails with `credential_scope` before it
+is sent, and a redirect never carries the credential to a different origin. When user input becomes
+part of a hostname, pass it through `hostLabel` so a value like `evil.com#` can't escape the template.
+
 Use `none` for actions that need no credential (the utility actions).
 
 ## HTTP client

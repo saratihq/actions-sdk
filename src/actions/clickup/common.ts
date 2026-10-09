@@ -8,7 +8,12 @@ import { dropdown, type DropdownOption, type DropdownSchema } from '../../core/p
 export const CLICKUP_API_BASE = 'https://api.clickup.com/api/v2';
 
 /** ClickUp tokens attach as a BARE `Authorization` value — no `Bearer ` prefix. */
-export const clickupAuth: ApiKeyScheme = { type: 'apiKey', in: 'header', name: 'Authorization' };
+export const clickupAuth: ApiKeyScheme = {
+  type: 'apiKey',
+  origins: ['https://api.clickup.com'],
+  in: 'header',
+  name: 'Authorization',
+};
 
 /** A ClickUp object reference (id + name), the shape reads and pickers use. */
 export interface ClickupResource {

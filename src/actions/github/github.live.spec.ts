@@ -1,6 +1,6 @@
 import { createDirectAuth } from '../../core/auth-factories';
 import { HttpClient } from '../../core/http/client';
-import { liveDescribe } from '../../testing/live';
+import { LIVE, liveDescribe } from '../../testing/live';
 import { githubTokenAuth, listIssues } from './list-issues';
 
 /** LIVE smoke test: github.list_issues against the real REST API, unauthenticated. Gated by ORCHESTR_LIVE. */
@@ -28,3 +28,19 @@ liveDescribe('github — live via direct transport (unauthenticated)', () => {
     console.log(`live: github.list_issues → ${out.count} real issues across multiple pages`);
   }, 30_000);
 });
+
+const token = process.env.GITHUB_LIVE_TOKEN;
+(LIVE && token ? describe : describe.skip)(
+  'github — live with a real token, scoped to api.github.com',
+  () => {
+    it('list_issues walks every Link-header page with a real token scoped to api.github.com', async () => {
+      const auth = createDirectAuth(githubTokenAuth, { type: 'apiKey', value: token ?? '' });
+      const out = await listIssues.execute({
+        auth,
+        http: new HttpClient(),
+        props: { owner: 'microsoft', repo: 'vscode', state: 'open', limit: 120 },
+      });
+      expect(out.count).toBeGreaterThan(100);
+    }, 30_000);
+  },
+);

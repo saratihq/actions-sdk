@@ -12,6 +12,7 @@ export interface NormalizedFailure {
 export type ActionErrorCode =
   | 'invalid_input'
   | 'ssrf_blocked'
+  | 'credential_scope'
   | 'auth_missing'
   | 'auth_unsupported'
   | 'transport_unreachable'

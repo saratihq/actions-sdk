@@ -9,6 +9,7 @@ export const LIST_ISSUES_TYPE = 'github.list_issues';
 /** A PAT/OAuth token on the `Authorization` header; public repos also read fine with a `none` credential. */
 export const githubTokenAuth: ApiKeyScheme = {
   type: 'apiKey',
+  origins: ['https://api.github.com'],
   in: 'header',
   name: 'Authorization',
   prefix: 'Bearer ',

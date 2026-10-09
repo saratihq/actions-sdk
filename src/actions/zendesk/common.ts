@@ -1,13 +1,14 @@
 import type { BasicScheme } from '../../core/auth';
+import { hostLabel } from '../../core/http/host-label';
 import type { NextPageFn } from '../../core/http/pagination';
 import { shortText } from '../../core/props';
 
 /** Declared `basic` for the direct transport (username `{email}/token`); the managed transport attaches its own bearer. */
-export const zendeskAuth: BasicScheme = { type: 'basic' };
+export const zendeskAuth: BasicScheme = { type: 'basic', origins: ['https://*.zendesk.com'] };
 
 /** Root a Support API call at the account's subdomain. */
 export function zendeskBaseUrl(subdomain: string): string {
-  return `https://${subdomain}.zendesk.com/api/v2`;
+  return `https://${hostLabel(subdomain, 'subdomain')}.zendesk.com/api/v2`;
 }
 
 /** The required subdomain prop every action shares. */

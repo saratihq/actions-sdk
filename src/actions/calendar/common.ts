@@ -13,6 +13,7 @@ export const CALENDAR_API_BASE = 'https://www.googleapis.com/calendar/v3';
 /** Calendar authenticates with an OAuth2 bearer access token, attached by the transport. */
 export const calendarAuth: OAuth2Scheme = {
   type: 'oauth2',
+  origins: ['https://www.googleapis.com'],
   scopes: ['https://www.googleapis.com/auth/calendar'],
 };
 

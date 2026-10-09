@@ -14,6 +14,7 @@ export const DRIVE_FILE_FIELDS = 'id,name,mimeType,modifiedTime,size,webViewLink
 /** Drive authenticates with an OAuth2 bearer access token, attached by the transport. */
 export const driveAuth: OAuth2Scheme = {
   type: 'oauth2',
+  origins: ['https://www.googleapis.com'],
   scopes: ['https://www.googleapis.com/auth/drive'],
 };
 

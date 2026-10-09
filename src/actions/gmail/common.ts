@@ -9,6 +9,7 @@ export const GMAIL_API_BASE = 'https://gmail.googleapis.com/gmail/v1/users/me';
 /** Gmail authenticates with an OAuth2 bearer access token, attached by the transport. */
 export const gmailAuth: OAuth2Scheme = {
   type: 'oauth2',
+  origins: ['https://gmail.googleapis.com'],
   scopes: ['https://www.googleapis.com/auth/gmail.modify'],
 };
 
