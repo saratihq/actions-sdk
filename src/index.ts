@@ -67,7 +67,8 @@ export {
   type PaginateOptions,
 } from './core/http/pagination';
 export { backoffDelay, DEFAULT_RETRY_POLICY, parseRetryAfter, type RetryPolicy } from './core/http/retry';
-// SSRF guard — the single choke point every fully user-supplied outbound URL passes through.
+// SSRF guard — `guardedFetch` is the direct transport's network hop; `guardUserUrl` checks a URL ahead of time.
+export { guardedFetch } from './core/http/guarded-fetch';
 export { assertPublicUrl, guardUserUrl, isBlockedIp, ssrfAllowedHostsFromEnv } from './core/http/ssrf';
 
 // Props — typed prop kinds + boundary validation.

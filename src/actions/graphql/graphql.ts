@@ -1,5 +1,4 @@
 import { defineAction } from '../../core/action';
-import { guardUserUrl } from '../../core/http/ssrf';
 import type { JsonValue } from '../../core/http/types';
 import { json, longText, shortText } from '../../core/props';
 
@@ -37,8 +36,6 @@ export const sendRequest = defineAction({
     headers: json({ label: 'Headers', description: 'A JSON object of request headers.', required: false }),
   },
   async run({ auth, props, http }): Promise<GraphqlResult> {
-    // SSRF guard: this URL is fully user-controlled, so block private/internal targets before posting.
-    await guardUserUrl(props.url);
     const body: { [k: string]: JsonValue } = { query: props.query };
     if (props.variables !== undefined) body.variables = props.variables;
     const res = await http.post<{ data?: unknown; errors?: unknown }>(props.url, {

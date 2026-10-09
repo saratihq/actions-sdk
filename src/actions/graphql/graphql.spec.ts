@@ -1,4 +1,6 @@
+import { createDirectAuth } from '../../core/auth-factories';
 import { FakeTransport, stubAuth } from '../../testing/fakes';
+import { startLoopbackServer, withAllowedHosts } from '../../testing/loopback-server';
 import { graphqlActions, sendRequest } from './index';
 
 describe('graphql.send_request', () => {
@@ -38,15 +40,21 @@ describe('graphql.send_request', () => {
     expect(out.data).toBeNull();
   });
 
-  it('blocks a request to a private/internal endpoint before it is sent (SSRF guard)', async () => {
-    const transport = new FakeTransport(() => ({ status: 200, headers: {}, data: {} }));
-    await expect(
-      sendRequest.execute({
-        auth: stubAuth(transport),
-        props: { url: 'http://10.0.0.5/graphql', query: '{ x }' },
-      }),
-    ).rejects.toMatchObject({ code: 'ssrf_blocked' });
-    expect(transport.requests).toHaveLength(0); // guard fired before any post
+  it('is refused by the transport before reaching a private endpoint (SSRF guard)', async () => {
+    const server = await startLoopbackServer();
+    try {
+      await withAllowedHosts('', async () => {
+        await expect(
+          sendRequest.execute({
+            auth: createDirectAuth({ type: 'none' }, { type: 'none' }),
+            props: { url: `http://127.0.0.1:${server.port}/graphql`, query: '{ x }' },
+          }),
+        ).rejects.toMatchObject({ code: 'ssrf_blocked' });
+      });
+      expect(server.hits).toHaveLength(0);
+    } finally {
+      await server.close();
+    }
   });
 
   it('exposes one action, graphql.* typed', () => {

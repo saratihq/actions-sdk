@@ -1,5 +1,7 @@
+import { createDirectAuth } from '../../core/auth-factories';
 import type { NormalizedResponse } from '../../core/http/types';
 import { FakeTransport, stubAuth } from '../../testing/fakes';
+import { startLoopbackServer, withAllowedHosts } from '../../testing/loopback-server';
 import { MemoryStore } from '../../testing/memory-store';
 import { httpActions, newItem, parseUrl, sendRequest } from './index';
 
@@ -48,15 +50,21 @@ describe('http.send_request', () => {
     expect(out.status).toBe(404);
   });
 
-  it('blocks a request to a private/internal address before it is sent (SSRF guard)', async () => {
-    const transport = new FakeTransport(() => ({ status: 200, headers: {}, data: {} }));
-    await expect(
-      sendRequest.execute({
-        auth: stubAuth(transport),
-        props: { method: 'GET', url: 'http://169.254.169.254/latest/meta-data/' },
-      }),
-    ).rejects.toMatchObject({ code: 'ssrf_blocked' });
-    expect(transport.requests).toHaveLength(0); // guard fired before any fetch
+  it('is refused by the transport before reaching a private address (SSRF guard)', async () => {
+    const server = await startLoopbackServer();
+    try {
+      await withAllowedHosts('', async () => {
+        await expect(
+          sendRequest.execute({
+            auth: createDirectAuth({ type: 'none' }, { type: 'none' }),
+            props: { method: 'GET', url: `http://[::ffff:127.0.0.1]:${server.port}/latest/meta-data/` },
+          }),
+        ).rejects.toMatchObject({ code: 'ssrf_blocked' });
+      });
+      expect(server.hits).toHaveLength(0);
+    } finally {
+      await server.close();
+    }
   });
 });
 
@@ -130,13 +138,22 @@ describe('http.new_item polling trigger', () => {
     expect(out.events).toHaveLength(2);
   });
 
-  it('blocks polling a private/internal address before any fetch (SSRF guard)', async () => {
-    const store = new MemoryStore();
-    const transport = new FakeTransport(() => listResponse([1]));
-    await expect(
-      newItem.runPoll({ auth: stubAuth(transport), props: { url: 'http://127.0.0.1:8001/feed' }, store }),
-    ).rejects.toMatchObject({ code: 'ssrf_blocked' });
-    expect(transport.requests).toHaveLength(0); // guard fired before any fetch
+  it('is refused by the transport before polling a private address (SSRF guard)', async () => {
+    const server = await startLoopbackServer();
+    try {
+      await withAllowedHosts('', async () => {
+        await expect(
+          newItem.runPoll({
+            auth: createDirectAuth({ type: 'none' }, { type: 'none' }),
+            props: { url: `http://localhost:${server.port}/feed` },
+            store: new MemoryStore(),
+          }),
+        ).rejects.toMatchObject({ code: 'ssrf_blocked' });
+      });
+      expect(server.hits).toHaveLength(0);
+    } finally {
+      await server.close();
+    }
   });
 });
 
