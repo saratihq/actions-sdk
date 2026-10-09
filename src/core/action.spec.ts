@@ -107,7 +107,7 @@ describe('toManifest — UPPERCASE prop mapping', () => {
     type: 'demo.kinds',
     name: 'Kinds',
     description: 'One of each mapped kind.',
-    auth: { type: 'oauth2' },
+    auth: { type: 'oauth2', origins: ['https://api.test'] },
     props: {
       a: shortText({ label: 'A', required: true }),
       b: longText({ label: 'B', required: false }),

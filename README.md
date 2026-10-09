@@ -60,7 +60,9 @@ export const sendChannelMessage = defineAction({
   timeouts, and error normalization to a single shape `{ status, message, retryable }`.
 - **Auth** — an action declares an `AuthScheme` and receives an opaque `AuthHandle`. The
   credential is resolved behind the handle and is never readable by action code, so the same
-  action runs with direct (bring-your-own) or managed credentials with no branching.
+  action runs with direct (bring-your-own) or managed credentials with no branching. Each scheme
+  declares the origins its credential may be sent to; nothing else, redirects included, ever
+  receives it.
 
 See [`docs/writing-an-action.md`](docs/writing-an-action.md) and
 [`docs/writing-a-trigger.md`](docs/writing-a-trigger.md) for full walkthroughs.

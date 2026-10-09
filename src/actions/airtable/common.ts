@@ -11,6 +11,7 @@ export const AIRTABLE_API_BASE = 'https://api.airtable.com/v0';
 /** PAT or managed-OAuth token, both as a Bearer header — one `apiKey` scheme so both transports share code. */
 export const airtableAuth: ApiKeyScheme = {
   type: 'apiKey',
+  origins: ['https://api.airtable.com'],
   in: 'header',
   name: 'Authorization',
   prefix: 'Bearer ',

@@ -2,7 +2,7 @@ import zlib from 'node:zlib';
 
 import { fetch as plainFetch } from 'undici';
 
-import type { AuthScheme, DirectCredential } from '../auth';
+import type { AuthScheme, DirectCredential, NoneScheme } from '../auth';
 import { createDirectAuth } from '../auth-factories';
 import {
   type LoopbackHit,
@@ -17,6 +17,8 @@ import type { FetchLike, HttpMethod } from './types';
  * Ordinary requests must reach the server, and come back to the caller, exactly as plain fetch delivers them:
  * the guard may refuse private targets, never an ordinary request to an allowed one.
  */
+type Unscoped<T> = T extends unknown ? Omit<T, 'origins'> : never;
+
 describe('guarded hop — parity with plain fetch for ordinary requests', () => {
   let server: LoopbackServer;
   let base: string;
@@ -59,7 +61,7 @@ describe('guarded hop — parity with plain fetch for ordinary requests', () => 
     method: HttpMethod;
     path: string;
     options?: Omit<RequestOptions, 'auth'>;
-    scheme?: AuthScheme;
+    scheme?: Unscoped<Exclude<AuthScheme, NoneScheme>>;
     credential?: DirectCredential;
   }
 
@@ -77,7 +79,7 @@ describe('guarded hop — parity with plain fetch for ordinary requests', () => 
 
   const send = async (c: Case, fetchImpl?: FetchLike) => {
     const before = server.hits.length;
-    const scheme = c.scheme ?? { type: 'none' };
+    const scheme: AuthScheme = c.scheme ? { ...c.scheme, origins: [base] } : { type: 'none' };
     const credential = c.credential ?? { type: 'none' };
     const auth = fetchImpl
       ? createDirectAuth(scheme, credential, { fetchImpl })

@@ -14,6 +14,7 @@ export const DROPBOX_API_BASE = 'https://api.dropboxapi.com/2';
 /** Dropbox authenticates with an OAuth2 bearer access token, attached by the transport. */
 export const dropboxAuth: OAuth2Scheme = {
   type: 'oauth2',
+  origins: ['https://api.dropboxapi.com'],
   scopes: ['files.metadata.read', 'files.content.read', 'files.content.write'],
 };
 

@@ -1,15 +1,16 @@
 import { createHash } from 'node:crypto';
 import type { BasicScheme } from '../../core/auth';
+import { hostLabel } from '../../core/http/host-label';
 import { shortText } from '../../core/props';
 
 /** Shared Mailchimp Marketing API `/3.0` building blocks; the host is datacenter-scoped, so `serverPrefix` is a required prop. */
 
 /** HTTP Basic (any username + the API key) on the direct transport; managed attaches its own Bearer. */
-export const mailchimpAuth: BasicScheme = { type: 'basic' };
+export const mailchimpAuth: BasicScheme = { type: 'basic', origins: ['https://*.api.mailchimp.com'] };
 
 /** Root a Marketing API call at the connection's datacenter. */
 export function mailchimpBaseUrl(serverPrefix: string): string {
-  return `https://${serverPrefix}.api.mailchimp.com/3.0`;
+  return `https://${hostLabel(serverPrefix, 'serverPrefix')}.api.mailchimp.com/3.0`;
 }
 
 /** The required datacenter-prefix prop every action shares. */

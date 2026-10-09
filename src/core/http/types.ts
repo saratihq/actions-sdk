@@ -91,6 +91,10 @@ export type FetchLike = (
     signal?: AbortSignal;
     /** `'manual'` hands back a redirect response unfollowed; the default follows it. */
     redirect?: 'follow' | 'manual';
+    /** Headers carrying the credential; never sent on a redirect hop to another origin. */
+    credentialHeaders?: readonly string[];
+    /** Query params carrying the credential; stripped from every redirect hop once it leaves the origin. */
+    credentialParams?: readonly string[];
   },
 ) => Promise<FetchLikeResponse>;
 

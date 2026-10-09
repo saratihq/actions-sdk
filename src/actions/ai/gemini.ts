@@ -10,7 +10,12 @@ import {
 } from './generate-text';
 
 /** Gemini takes the key as a `?key=` query parameter. */
-const geminiAuth: ApiKeyScheme = { type: 'apiKey', in: 'query', name: 'key' };
+export const geminiAuth: ApiKeyScheme = {
+  type: 'apiKey',
+  origins: ['https://generativelanguage.googleapis.com'],
+  in: 'query',
+  name: 'key',
+};
 
 /** The `:generateContent` request body. `systemInstruction` and JSON mode live in their own slots. */
 function geminiBody(input: GenerateInput): JsonValue {

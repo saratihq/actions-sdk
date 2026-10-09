@@ -53,7 +53,13 @@ describe('DirectTransport form encoding', () => {
     );
     const client = new HttpClient();
     const transport = new DirectTransport({
-      scheme: { type: 'apiKey', in: 'header', name: 'Authorization', prefix: 'Bearer ' },
+      scheme: {
+        type: 'apiKey',
+        origins: ['https://api.stripe.com'],
+        in: 'header',
+        name: 'Authorization',
+        prefix: 'Bearer ',
+      },
       credential: { type: 'apiKey', value: 'sk_test' },
       fetchImpl: fetch,
     });

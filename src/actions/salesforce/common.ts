@@ -2,7 +2,7 @@ import type { OAuth2Scheme } from '../../core/auth';
 import { shortText } from '../../core/props';
 
 /** Salesforce authenticates with an OAuth2 bearer access token, attached by the transport. */
-export const salesforceAuth: OAuth2Scheme = { type: 'oauth2' };
+export const salesforceAuth: OAuth2Scheme = { type: 'oauth2', origins: ['https://*.my.salesforce.com'] };
 
 /** Root a REST data-API call at the org's instance + api version. */
 export function salesforceBaseUrl(instanceUrl: string, apiVersion: string): string {
