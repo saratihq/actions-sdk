@@ -77,6 +77,24 @@ describe('guardedFetch', () => {
     });
   });
 
+  it('refuses a redirect to a URL carrying credentials without echoing them', async () => {
+    const to = encodeURIComponent(`http://user:hunter2@${base}/landing`);
+    const failure = await withAllowedHosts('127.0.0.1', () =>
+      guardedFetch(`http://${base}/redirect?to=${to}`).catch((err: unknown) => err),
+    );
+    expect(failure).toMatchObject({ code: 'http_error' });
+    expect(String((failure as Error).message)).not.toContain('hunter2');
+    expect(server.hits).toHaveLength(1);
+  });
+
+  it('names the refused host but never the private address it resolved to', async () => {
+    await withAllowedHosts('', async () => {
+      const failure = await guardedFetch(`http://localhost:${server.port}/`).catch((err: unknown) => err);
+      expect((failure as Error).message).toContain('(localhost)');
+      expect((failure as Error).message).not.toMatch(/127\.0\.0\.1|::1/);
+    });
+  });
+
   it('follows an allowed redirect, rewriting a 303 POST to a body-less GET', async () => {
     const to = encodeURIComponent('/landing');
     const res = await withAllowedHosts('127.0.0.1', () =>

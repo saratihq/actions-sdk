@@ -37,8 +37,9 @@ async function send(url: URL, init: FetchInit): Promise<Response> {
 }
 
 function redirectTarget(location: string, from: URL): URL {
+  let next: URL;
   try {
-    return new URL(location, from);
+    next = new URL(location, from);
   } catch {
     throw new ActionError({
       code: 'http_error',
@@ -46,6 +47,14 @@ function redirectTarget(location: string, from: URL): URL {
       retryable: false,
     });
   }
+  if (next.username || next.password) {
+    throw new ActionError({
+      code: 'http_error',
+      message: `${from.origin} redirected to a URL carrying credentials`,
+      retryable: false,
+    });
+  }
+  return next;
 }
 
 /** Fetch's own rewrite of a redirected request: 303 (and 301/302 after POST) becomes a body-less GET. */

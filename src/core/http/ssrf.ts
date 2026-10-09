@@ -74,10 +74,11 @@ export function ssrfAllowedHostsFromEnv(): string[] {
     .filter(Boolean);
 }
 
-function blockedAddress(host: string, addr: string): ActionError {
+// The resolved address stays out of the message so a refusal cannot map internal names to addresses.
+function blockedAddress(host: string): ActionError {
   return new ActionError({
     code: 'ssrf_blocked',
-    message: `refusing to send a request to a private/internal address (${host} → ${addr}). Set ORCHESTR_HTTP_ALLOWED_HOSTS to allow it.`,
+    message: `refusing to send a request to a private/internal address (${host}). Set ORCHESTR_HTTP_ALLOWED_HOSTS to allow it.`,
     retryable: false,
   });
 }
@@ -94,7 +95,7 @@ export function preflightTarget(url: URL, allowedHosts: string[]): string | null
   const host = url.hostname.toLowerCase().replace(/^\[|\]$/g, '');
   if (allowedHosts.includes(host)) return null;
   if (!isIP(host)) return host;
-  if (isBlockedIp(host)) throw blockedAddress(host, host);
+  if (isBlockedIp(host)) throw blockedAddress(host);
   return null;
 }
 
@@ -121,8 +122,7 @@ export async function assertPublicUrl(rawUrl: string, opts: { allowedHosts?: str
       retryable: false,
     });
   }
-  const blocked = addresses.find((a) => isBlockedIp(a.address));
-  if (blocked) throw blockedAddress(host, blocked.address);
+  if (addresses.some((a) => isBlockedIp(a.address))) throw blockedAddress(host);
 }
 
 /** Validate a user-supplied URL ahead of time (e.g. on save); requests themselves are re-checked per hop by {@link guardedFetch}. */
@@ -134,9 +134,9 @@ export async function guardUserUrl(url: string): Promise<void> {
 export const ssrfSafeLookup: LookupFunction = (hostname, options, callback) => {
   dnsLookup(hostname, { ...options, all: true }, (err, addresses) => {
     if (err) return callback(err, '', 0);
-    if (!ssrfAllowedHostsFromEnv().includes(hostname.toLowerCase())) {
-      const blocked = addresses.find((a) => isBlockedIp(a.address));
-      if (blocked) return callback(blockedAddress(hostname, blocked.address), '', 0);
+    const allowlisted = ssrfAllowedHostsFromEnv().includes(hostname.toLowerCase());
+    if (!allowlisted && addresses.some((a) => isBlockedIp(a.address))) {
+      return callback(blockedAddress(hostname), '', 0);
     }
     const [first] = addresses;
     if (!first) {
