@@ -1,5 +1,4 @@
 import { defineTrigger } from '../../core/trigger';
-import { guardUserUrl } from '../../core/http/ssrf';
 import type { JsonValue } from '../../core/http/types';
 import { shortText } from '../../core/props';
 
@@ -50,8 +49,6 @@ export const newItem = defineTrigger({
     }),
   },
   async poll({ auth, props, http }): Promise<JsonValue[]> {
-    // SSRF guard: this URL is fully user-controlled, so block private/internal targets before fetching.
-    await guardUserUrl(props.url);
     const res = await http.get<JsonValue>(props.url, { auth });
     const extracted = atPath(res.data, props.itemsPath ?? '');
     return Array.isArray(extracted) ? extracted : [];

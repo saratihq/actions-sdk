@@ -1,5 +1,7 @@
+import { createDirectAuth } from '../../core/auth-factories';
 import type { NormalizedResponse } from '../../core/http/types';
 import { FakeTransport, stubAuth } from '../../testing/fakes';
+import { startLoopbackServer, withAllowedHosts } from '../../testing/loopback-server';
 import { MemoryStore } from '../../testing/memory-store';
 import { parseFeed } from './feed';
 import { newItem } from './new-item.polling';
@@ -107,12 +109,21 @@ describe('rss.new_item polling trigger', () => {
     expect(third.events.map((i) => i.id)).toEqual(['guid-3']);
   });
 
-  it('blocks polling a private/internal feed URL before any fetch (SSRF guard)', async () => {
-    const store = new MemoryStore();
-    const transport = new FakeTransport(() => feedResponse(RSS_SAMPLE));
-    await expect(
-      newItem.runPoll({ auth: stubAuth(transport), props: { url: 'http://192.168.1.10/feed.xml' }, store }),
-    ).rejects.toMatchObject({ code: 'ssrf_blocked' });
-    expect(transport.requests).toHaveLength(0); // guard fired before any fetch
+  it('is refused by the transport before polling a private feed URL (SSRF guard)', async () => {
+    const server = await startLoopbackServer();
+    try {
+      await withAllowedHosts('', async () => {
+        await expect(
+          newItem.runPoll({
+            auth: createDirectAuth({ type: 'none' }, { type: 'none' }),
+            props: { url: `http://[::ffff:7f00:1]:${server.port}/feed.xml` },
+            store: new MemoryStore(),
+          }),
+        ).rejects.toMatchObject({ code: 'ssrf_blocked' });
+      });
+      expect(server.hits).toHaveLength(0);
+    } finally {
+      await server.close();
+    }
   });
 });

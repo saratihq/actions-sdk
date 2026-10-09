@@ -32,6 +32,9 @@ importers:
       turndown:
         specifier: ^7.2.4
         version: 7.2.4
+      undici:
+        specifier: ^7.30.0
+        version: 7.30.0
       unpdf:
         specifier: ^1.6.2
         version: 1.6.2
@@ -2716,8 +2719,8 @@ packages:
     resolution: {integrity: sha512-YmfV3YnEDzXRC5lZ2jWtWWHKGUm1zIt8AhesR1tens+HTNv+YZlN/dp6G727LOvMJ8xjP9Be7Y2Sdr96LDm+pg==}
     engines: {node: '>=18.17'}
 
-  undici@7.28.0:
-    resolution: {integrity: sha512-cRZYrTDwWznlnRiPjggAGxZXanty6M8RV1ff8Wm4LWXBp7/IG8v5DnOm74DtUBp9OONpK75YlPnIjQqX0dBDtA==}
+  undici@7.30.0:
+    resolution: {integrity: sha512-dkrQXeHSaoamnItlYbmzG0wFYrM0ZwDxCIg0A7aKjTyyhh9svRzCNFEzV+Vm05/yehjCzjDZ31KXfGEjYSztDQ==}
     engines: {node: '>=20.18.1'}
 
   unicode-emoji-modifier-base@1.0.0:
@@ -3513,7 +3516,7 @@ snapshots:
       p-filter: 4.1.0
       semantic-release: 25.0.8(typescript@5.9.3)
       tinyglobby: 0.2.17
-      undici: 7.28.0
+      undici: 7.30.0
       url-join: 5.0.0
     transitivePeerDependencies:
       - kerberos
@@ -5863,7 +5866,7 @@ snapshots:
 
   undici@6.27.0: {}
 
-  undici@7.28.0: {}
+  undici@7.30.0: {}
 
   unicode-emoji-modifier-base@1.0.0: {}
 

@@ -1,6 +1,7 @@
 import type { AuthScheme, DirectCredential } from '../auth';
 import { ActionError } from '../errors';
 import { encodeForm } from './form';
+import { guardedFetch } from './guarded-fetch';
 import { encodeMultipart } from './multipart';
 import {
   appendQuery,
@@ -9,14 +10,13 @@ import {
   isMultipartBody,
   type NormalizedRequest,
   type NormalizedResponse,
-  resolveFetch,
   type Transport,
 } from './types';
 
 export interface DirectTransportOptions {
   scheme: AuthScheme;
   credential: DirectCredential;
-  /** Inject a fetch for testing; defaults to the global. */
+  /** Replaces the SSRF-guarded network hop ({@link guardedFetch}); for tests only. */
   fetchImpl?: FetchLike;
 }
 
@@ -30,7 +30,7 @@ export class DirectTransport implements Transport {
   constructor(options: DirectTransportOptions) {
     this.scheme = options.scheme;
     this.credential = options.credential;
-    this.fetchImpl = resolveFetch(options.fetchImpl);
+    this.fetchImpl = options.fetchImpl ?? guardedFetch;
   }
 
   async send(request: NormalizedRequest): Promise<NormalizedResponse> {

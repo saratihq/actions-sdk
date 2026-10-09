@@ -1,6 +1,5 @@
 import { defineAction } from '../../core/action';
 import { ActionError } from '../../core/errors';
-import { guardUserUrl } from '../../core/http/ssrf';
 import type { HttpMethod, JsonValue, QueryValue } from '../../core/http/types';
 import { checkbox, dropdown, json, shortText } from '../../core/props';
 
@@ -80,8 +79,6 @@ export const sendRequest = defineAction({
   },
   async run({ auth, props, http }): Promise<SendRequestResult> {
     const method = props.method ?? 'GET';
-    // SSRF guard: this URL is fully user-controlled, so block private/internal targets before fetching.
-    await guardUserUrl(props.url);
     const res = await http.request(method, props.url, {
       auth,
       headers: toHeaderRecord(props.headers),
