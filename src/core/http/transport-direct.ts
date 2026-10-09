@@ -16,7 +16,7 @@ import {
 export interface DirectTransportOptions {
   scheme: AuthScheme;
   credential: DirectCredential;
-  /** Replaces the SSRF-guarded network hop ({@link guardedFetch}); for tests only. */
+  /** Replaces the SSRF-guarded network hop ({@link guardedFetch}), which switches the guard off; for tests only. */
   fetchImpl?: FetchLike;
 }
 

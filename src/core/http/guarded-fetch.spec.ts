@@ -1,4 +1,11 @@
-import { type LoopbackServer, startLoopbackServer, withAllowedHosts } from '../../testing/loopback-server';
+import {
+  type ConnectProxy,
+  type LoopbackServer,
+  startConnectProxy,
+  startLoopbackServer,
+  withAllowedHosts,
+  withEnv,
+} from '../../testing/loopback-server';
 import { guardedFetch } from './guarded-fetch';
 import { ssrfSafeLookup } from './ssrf';
 
@@ -12,6 +19,11 @@ describe('guardedFetch', () => {
       const to = new URLSearchParams(query).get('to');
       if (path === '/redirect' && to) {
         res.writeHead(Number(new URLSearchParams(query).get('status') ?? 302), { location: to });
+        res.end();
+        return;
+      }
+      if (path === '/utf8') {
+        res.writeHead(302, { location: Buffer.from('/café?q=ü', 'utf8').toString('latin1') });
         res.end();
         return;
       }
@@ -53,6 +65,7 @@ describe('guardedFetch', () => {
     await withAllowedHosts('localhost', async () => {
       await expect(guardedFetch(`http://localhost:${server.port}/redirect?to=${to}`)).rejects.toMatchObject({
         code: 'ssrf_blocked',
+        message: expect.stringContaining(`(127.0.0.1, redirected from http://localhost:${server.port})`),
       });
     });
     expect(server.hits.map((h) => h.url)).toEqual([`/redirect?to=${to}`]);
@@ -91,6 +104,7 @@ describe('guardedFetch', () => {
     await withAllowedHosts('', async () => {
       const failure = await guardedFetch(`http://localhost:${server.port}/`).catch((err: unknown) => err);
       expect((failure as Error).message).toContain('(localhost)');
+      expect((failure as Error).message).toContain('adding localhost to ORCHESTR_HTTP_ALLOWED_HOSTS');
       expect((failure as Error).message).not.toMatch(/127\.0\.0\.1|::1/);
     });
   });
@@ -140,7 +154,168 @@ describe('guardedFetch', () => {
   });
 
   it('fails a name that does not resolve without sending anything', async () => {
-    await expect(guardedFetch('http://does-not-exist.invalid/')).rejects.toThrow();
+    await expect(guardedFetch('http://does-not-exist.invalid/')).rejects.toMatchObject({
+      code: 'transport_unreachable',
+      message: expect.stringContaining('could not reach http://does-not-exist.invalid: getaddrinfo'),
+    });
+  });
+});
+
+describe('guardedFetch — request shape and failures', () => {
+  let server: LoopbackServer;
+  let base: string;
+
+  beforeEach(async () => {
+    server = await startLoopbackServer((req, res, hit) => {
+      if (hit.url.startsWith('/redirect')) {
+        res.writeHead(307, { location: '/landing' });
+        res.end();
+        return;
+      }
+      if (hit.url === '/utf8') {
+        res.writeHead(302, { location: Buffer.from('/café?q=ü', 'utf8').toString('latin1') });
+        res.end();
+        return;
+      }
+      res.end(`reached ${req.method} ${hit.url}`);
+    });
+    base = `127.0.0.1:${server.port}`;
+  });
+
+  afterEach(() => server.close());
+
+  it('says why a hop could not be reached, naming the origin and never its path or query', async () => {
+    const closed = await startLoopbackServer();
+    const { port } = closed;
+    await closed.close();
+    const failure = await withAllowedHosts('127.0.0.1', () =>
+      guardedFetch(`http://127.0.0.1:${port}/private-path?token=abc`).catch((err: unknown) => err),
+    );
+    expect(failure).toMatchObject({ code: 'transport_unreachable', retryable: true });
+    expect((failure as Error).message).toBe(
+      `could not reach http://127.0.0.1:${port}: connect ECONNREFUSED 127.0.0.1:${port}`,
+    );
+    expect((failure as Error).cause).toMatchObject({ code: 'ECONNREFUSED' });
+  });
+
+  it('hands back a redirect unfollowed when asked to, so a POST body is never re-sent', async () => {
+    const res = await withAllowedHosts('127.0.0.1', () =>
+      guardedFetch(`http://${base}/redirect`, { method: 'POST', body: 'secret=1', redirect: 'manual' }),
+    );
+    expect(res.status).toBe(307);
+    expect(server.hits.map((h) => h.url)).toEqual(['/redirect']);
+  });
+
+  it('follows a raw UTF-8 Location to the URL it names', async () => {
+    const res = await withAllowedHosts('127.0.0.1', () => guardedFetch(`http://${base}/utf8`));
+    expect(await res.text()).toBe('reached GET /caf%C3%A9?q=%C3%BC');
+    expect(server.hits.map((h) => h.url)).toEqual(['/utf8', '/caf%C3%A9?q=%C3%BC']);
+  });
+
+  it.each(['example.com/api', 'not a url'])(
+    'refuses %s as invalid input, not as a retryable failure',
+    async (url) => {
+      await expect(guardedFetch(url)).rejects.toMatchObject({
+        code: 'invalid_input',
+        retryable: false,
+        message: `invalid URL: "${url}"`,
+      });
+    },
+  );
+
+  it('refuses a URL carrying a username or password without echoing it', async () => {
+    const failure = await withAllowedHosts('127.0.0.1', () =>
+      guardedFetch(`http://user:hunter2@${base}/`).catch((err: unknown) => err),
+    );
+    expect(failure).toMatchObject({ code: 'invalid_input', retryable: false });
+    expect((failure as Error).message).not.toContain('hunter2');
+    expect(server.hits).toHaveLength(0);
+  });
+
+  it('opens a fresh pool when the allowlist changes, so a socket vetted under the old one is not reused', async () => {
+    await withAllowedHosts('localhost', async () => {
+      await (await guardedFetch(`http://localhost:${server.port}/first`)).text();
+    });
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    await withAllowedHosts('', async () => {
+      await expect(guardedFetch(`http://localhost:${server.port}/second`)).rejects.toMatchObject({
+        code: 'ssrf_blocked',
+      });
+    });
+    expect(server.hits.map((h) => h.url)).toEqual(['/first']);
+  });
+});
+
+describe('guardedFetch — behind an env proxy', () => {
+  let server: LoopbackServer;
+  let proxy: ConnectProxy;
+
+  const proxyEnv = (extra: Record<string, string | undefined> = {}): Record<string, string | undefined> => ({
+    NODE_USE_ENV_PROXY: '1',
+    HTTP_PROXY: `http://127.0.0.1:${proxy.port}`,
+    HTTPS_PROXY: undefined,
+    http_proxy: undefined,
+    https_proxy: undefined,
+    NO_PROXY: undefined,
+    no_proxy: undefined,
+    ORCHESTR_HTTP_ALLOWED_HOSTS: '',
+    ...extra,
+  });
+
+  beforeEach(async () => {
+    server = await startLoopbackServer();
+    proxy = await startConnectProxy(server.port);
+  });
+
+  afterEach(async () => {
+    await proxy.close();
+    await server.close();
+  });
+
+  it('sends a public target through the proxy, and never judges the proxy itself', async () => {
+    const res = await withEnv(proxyEnv(), () => guardedFetch('http://93.184.215.14/through'));
+    expect(await res.text()).toBe('reached');
+    expect(proxy.tunnels).toEqual(['93.184.215.14:80']);
+    expect(server.hits.map((h) => h.url)).toEqual(['/through']);
+  });
+
+  it.each([
+    ['a name resolving to loopback', () => `http://localhost:${server.port}/`],
+    ['the hex IPv4-mapped literal', () => `http://[::ffff:127.0.0.1]:${server.port}/`],
+  ])('judges %s on this server before asking the proxy', async (_label, url) => {
+    await withEnv(proxyEnv(), async () => {
+      await expect(guardedFetch(url())).rejects.toMatchObject({ code: 'ssrf_blocked' });
+    });
+    expect(proxy.tunnels).toEqual([]);
+    expect(server.hits).toHaveLength(0);
+  });
+
+  it('refuses a proxied name this server cannot resolve, since it cannot be judged', async () => {
+    await withEnv(proxyEnv(), async () => {
+      await expect(guardedFetch('http://does-not-exist.invalid/')).rejects.toMatchObject({
+        code: 'unresolvable_host',
+      });
+    });
+    expect(proxy.tunnels).toEqual([]);
+  });
+
+  it('goes direct for a NO_PROXY host', async () => {
+    const res = await withEnv(
+      proxyEnv({ NO_PROXY: 'localhost', ORCHESTR_HTTP_ALLOWED_HOSTS: 'localhost' }),
+      () => guardedFetch(`http://localhost:${server.port}/direct`),
+    );
+    expect(res.status).toBe(200);
+    expect(proxy.tunnels).toEqual([]);
+    expect(server.hits.map((h) => h.url)).toEqual(['/direct']);
+  });
+
+  it('ignores HTTP_PROXY unless Node is told to use the env proxy, as Node fetch does', async () => {
+    const res = await withEnv(
+      proxyEnv({ NODE_USE_ENV_PROXY: undefined, ORCHESTR_HTTP_ALLOWED_HOSTS: '127.0.0.1' }),
+      () => guardedFetch(`http://127.0.0.1:${server.port}/direct`),
+    );
+    expect(res.status).toBe(200);
+    expect(proxy.tunnels).toEqual([]);
   });
 });
 

@@ -3,7 +3,13 @@ import { fetch as unguardedFetch } from 'undici';
 import { sendRequest } from '../../actions/http/http';
 import { createDirectAuth } from '../auth-factories';
 import { liveDescribe } from '../../testing/live';
-import { type LoopbackServer, startLoopbackServer, withAllowedHosts } from '../../testing/loopback-server';
+import {
+  type LoopbackServer,
+  startConnectProxy,
+  startLoopbackServer,
+  withAllowedHosts,
+  withEnv,
+} from '../../testing/loopback-server';
 
 /** LIVE: the SSRF bypasses against a real 127.0.0.1 server and real public redirects (httpbin.org); gated behind ORCHESTR_LIVE. */
 liveDescribe('SSRF guard — live, real sockets', () => {
@@ -52,5 +58,29 @@ liveDescribe('SSRF guard — live, real sockets', () => {
     };
     expect(out.status).toBe(200);
     expect(out.body.args).toEqual({ proof: 'guarded' });
+  });
+
+  it('behind an env proxy, judges a real public name on this server and tunnels it through the proxy', async () => {
+    const proxy = await startConnectProxy(server.port);
+    try {
+      const env = {
+        NODE_USE_ENV_PROXY: '1',
+        HTTP_PROXY: `http://127.0.0.1:${proxy.port}`,
+        ORCHESTR_HTTP_ALLOWED_HOSTS: '',
+      };
+      const out = (await withEnv(env, () =>
+        sendRequest.execute({ auth, props: { method: 'GET', url: 'http://example.com/via-proxy' } }),
+      )) as { status: number };
+      expect(out.status).toBe(200);
+      expect(proxy.tunnels).toEqual(['example.com:80']);
+      await expect(
+        withEnv(env, () =>
+          sendRequest.execute({ auth, props: { method: 'GET', url: 'http://localtest.me/' } }),
+        ),
+      ).rejects.toMatchObject({ code: 'ssrf_blocked' });
+      expect(proxy.tunnels).toEqual(['example.com:80']);
+    } finally {
+      await proxy.close();
+    }
   });
 });

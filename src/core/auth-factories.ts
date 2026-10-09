@@ -2,7 +2,7 @@ import { type AuthHandle, type AuthScheme, createAuthHandle, type DirectCredenti
 import { type FetchLike, type Transport } from './http/types';
 import { DirectTransport } from './http/transport-direct';
 
-/** Build a handle that sends straight to the provider with a BYO credential (`{ type: 'none' }` for public endpoints); `fetchImpl` replaces the SSRF-guarded hop. */
+/** Build a handle that sends straight to the provider with a BYO credential (`{ type: 'none' }` for public endpoints); `fetchImpl` replaces the SSRF-guarded hop and so switches the guard off (tests only). */
 export function createDirectAuth(
   scheme: AuthScheme,
   credential: DirectCredential,

@@ -65,6 +65,27 @@ export const sendChannelMessage = defineAction({
 See [`docs/writing-an-action.md`](docs/writing-an-action.md) and
 [`docs/writing-a-trigger.md`](docs/writing-a-trigger.md) for full walkthroughs.
 
+## Private addresses
+
+Every request on the direct transport (`createDirectAuth`) goes through `guardedFetch`, which
+refuses a target that is not publicly routable: private, loopback, link-local (cloud metadata
+included), carrier-grade NAT and reserved ranges, in every IPv6 spelling. A hostname is judged on
+the address the connection actually dials, and every redirect hop is judged again. The refusal is
+an `ActionError` with code `ssrf_blocked`.
+
+- **Letting a host in:** list it in `ORCHESTR_HTTP_ALLOWED_HOSTS`, comma-separated hostnames or IP
+  addresses. An entry is matched after URL normalisation and covers every port; a scheme or port
+  in an entry is stripped, and an entry that still is not a host (a range, a wildcard, a path) is
+  ignored with a warning.
+- **Proxies:** with Node's `NODE_USE_ENV_PROXY=1` (or `--use-env-proxy`) and `HTTP(S)_PROXY`
+  set, requests go through the proxy and `NO_PROXY` is honoured. A proxied target is judged on
+  this machine's DNS before the send; the proxy resolves it again, so restrict egress at the
+  proxy too.
+- **Ahead of time:** `guardUserUrl(url)` checks a URL without sending anything, for validating
+  input on save. A host that does not resolve fails it with code `unresolvable_host`.
+- **Tests:** passing `fetchImpl` to `createDirectAuth` replaces `guardedFetch` and so switches
+  the guard off.
+
 ## Included actions
 
 Auth-free utility actions with zero runtime dependencies (Node built-ins only) — they run
