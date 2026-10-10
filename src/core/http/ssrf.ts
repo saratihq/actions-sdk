@@ -73,7 +73,7 @@ export function isBlockedIp(ip: string): boolean {
 export const SSRF_ALLOWLIST_ENV = 'ORCHESTR_HTTP_ALLOWED_HOSTS';
 
 const warnedEntries = new Set<string>();
-let allowlist: { raw: string; hosts: string[] } = { raw: '', hosts: [] };
+let allowlist: { raw: string; hosts: readonly string[] } = { raw: '', hosts: Object.freeze([]) };
 
 function warnOnce(entry: string, why: string): void {
   if (warnedEntries.has(entry)) return;
@@ -81,45 +81,58 @@ function warnOnce(entry: string, why: string): void {
   process.emitWarning(`${SSRF_ALLOWLIST_ENV} entry "${entry}" ${why}`, { code: 'SARATI_HTTP_ALLOWED_HOSTS' });
 }
 
+const NOT_A_HOST =
+  'is ignored: list a bare hostname or IP address, not a range, wildcard, path or credentials';
+const SCHEME = /^[a-z][a-z0-9+.-]*:\/\//i;
+
+// An entry admits every port and scheme on its host, so one naming a port or scheme is refused rather than widened.
 function allowlistHost(entry: string): string | null {
+  const authority = entry.replace(SCHEME, '');
   let url: URL;
   try {
-    url = new URL(entry.includes('://') ? entry : `http://${isIP(entry) === 6 ? `[${entry}]` : entry}`);
+    url = new URL(`http://${isIP(authority) === 6 ? `[${authority}]` : authority}`);
   } catch {
+    warnOnce(entry, NOT_A_HOST);
     return null;
   }
   const host = url.hostname.replace(/^\[|\]$/g, '');
-  if (url.username || url.password || url.pathname !== '/' || url.search || url.hash || host.includes('*')) {
+  if (url.username || url.password || url.pathname !== '/' || url.search || url.hash || /^\.|\*/.test(host)) {
+    warnOnce(entry, NOT_A_HOST);
     return null;
   }
-  if (url.port) warnOnce(entry, `names a port, which is ignored: it allows every port on ${host}`);
+  const namesPort = isIP(authority) !== 6 && /:\d*\/?$/.test(authority);
+  if (SCHEME.test(entry) || namesPort) {
+    warnOnce(
+      entry,
+      `is ignored: an entry allows every port and scheme on its host; write "${host}" if that is what you mean`,
+    );
+    return null;
+  }
   return host;
 }
 
-function parseAllowlist(raw: string): string[] {
-  const hosts: string[] = [];
-  for (const entry of raw
+function parseAllowlist(raw: string): readonly string[] {
+  const hosts = raw
     .split(',')
-    .map((e) => e.trim())
-    .filter(Boolean)) {
-    const host = allowlistHost(entry);
-    if (host === null) {
-      warnOnce(
-        entry,
-        'is ignored: list a bare hostname or IP address, not a range, wildcard, path or credentials',
-      );
-    } else {
-      hosts.push(host);
-    }
-  }
-  return hosts;
+    .map((entry) => entry.trim())
+    .filter(Boolean)
+    .flatMap((entry) => {
+      const host = allowlistHost(entry);
+      return host === null ? [] : [host];
+    });
+  return Object.freeze(hosts);
+}
+
+/** The guard's own allowlist, parsed once per value of the environment variable; never handed out mutable. */
+export function allowedHosts(): readonly string[] {
+  const raw = process.env[SSRF_ALLOWLIST_ENV] ?? '';
+  if (raw !== allowlist.raw) allowlist = { raw, hosts: parseAllowlist(raw) };
+  return allowlist.hosts;
 }
 
 /** Allowed hosts from the environment, normalised the way a URL writes its hostname; an unusable entry is skipped with a one-time warning. */
 export function ssrfAllowedHostsFromEnv(): string[] {
-  const raw = process.env[SSRF_ALLOWLIST_ENV] ?? '';
-  if (raw !== allowlist.raw) allowlist = { raw, hosts: parseAllowlist(raw) };
-  return allowlist.hosts;
+  return [...allowedHosts()];
 }
 
 /** The hostname the guard judges and the allowlist matches: lower-cased, IPv6 without brackets. */
@@ -141,13 +154,13 @@ function unresolvable(host: string, cause?: unknown): ActionError {
   return new ActionError({
     code: 'unresolvable_host',
     message: `${host} does not resolve from this server, so it cannot be confirmed as a public address`,
-    retryable: true,
+    retryable: (cause as { code?: unknown } | undefined)?.code === 'EAI_AGAIN',
     ...(cause !== undefined ? { cause } : {}),
   });
 }
 
 /** Refuse a non-http(s) URL or a private literal address; returns the hostname still to resolve, or null when none is. */
-export function preflightTarget(url: URL, allowedHosts: string[]): string | null {
+export function preflightTarget(url: URL, allowed: readonly string[]): string | null {
   if (url.protocol !== 'http:' && url.protocol !== 'https:') {
     throw new ActionError({
       code: 'ssrf_blocked',
@@ -156,24 +169,24 @@ export function preflightTarget(url: URL, allowedHosts: string[]): string | null
     });
   }
   const host = targetHost(url);
-  if (allowedHosts.includes(host)) return null;
+  if (allowed.includes(host)) return null;
   if (!isIP(host)) return host;
   if (isBlockedIp(host)) throw ssrfRefusal(host);
   return null;
 }
 
-/** Resolve the target here and refuse it unless every address is public — for a check made before the connection that uses it. */
-export async function assertPublicTarget(url: URL, allowedHosts: string[]): Promise<void> {
-  const host = preflightTarget(url, allowedHosts);
-  if (host === null) return;
+/** Resolve `host` here and return the address to dial, refusing it unless every address it resolves to is public. */
+export async function publicAddress(host: string): Promise<string> {
   let addresses: LookupAddress[];
   try {
     addresses = await lookup(host, { all: true });
   } catch (err) {
     throw unresolvable(host, err);
   }
-  if (addresses.length === 0) throw unresolvable(host);
+  const [first] = addresses;
+  if (!first) throw unresolvable(host);
   if (addresses.some((a) => isBlockedIp(a.address))) throw ssrfRefusal(host);
+  return first.address;
 }
 
 /** Ahead-of-time check that `rawUrl` is http(s) and EVERY address its host resolves to is public; an unresolvable host fails closed. */
@@ -184,19 +197,20 @@ export async function assertPublicUrl(rawUrl: string, opts: { allowedHosts?: str
   } catch {
     throw new ActionError({ code: 'invalid_input', message: `invalid URL: "${rawUrl}"`, retryable: false });
   }
-  await assertPublicTarget(url, opts.allowedHosts ?? []);
+  const host = preflightTarget(url, opts.allowedHosts ?? []);
+  if (host !== null) await publicAddress(host);
 }
 
 /** Validate a user-supplied URL ahead of time (e.g. on save); requests themselves are re-checked per hop by {@link guardedFetch}. */
 export async function guardUserUrl(url: string): Promise<void> {
-  await assertPublicUrl(url, { allowedHosts: ssrfAllowedHostsFromEnv() });
+  await assertPublicUrl(url, { allowedHosts: [...allowedHosts()] });
 }
 
 /** A `net.connect` lookup that refuses a name resolving to any non-public address, so the address checked is the one dialled. */
 export const ssrfSafeLookup: LookupFunction = (hostname, options, callback) => {
   dnsLookup(hostname, { ...options, all: true }, (err, addresses) => {
     if (err) return callback(err, '', 0);
-    const allowlisted = ssrfAllowedHostsFromEnv().includes(hostname.toLowerCase());
+    const allowlisted = allowedHosts().includes(hostname.toLowerCase());
     if (!allowlisted && addresses.some((a) => isBlockedIp(a.address))) {
       return callback(ssrfRefusal(hostname), '', 0);
     }

@@ -163,8 +163,9 @@ export class HttpClient {
         });
       }
 
-      const canRetry =
-        failure.retryable && (idempotent || failure.status === 0) && attempt < this.retry.retries;
+      // A connection lost once the request may have gone out is resent only when resending is safe.
+      const neverSent = failure.status === 0 && thrown?.code !== 'transport_interrupted';
+      const canRetry = failure.retryable && (idempotent || neverSent) && attempt < this.retry.retries;
       if (!canRetry) {
         // Only synthesise an error for the HTTP-status path; a transport throw keeps its own code.
         if (thrown) throw thrown;

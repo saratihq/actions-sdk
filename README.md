@@ -69,20 +69,29 @@ See [`docs/writing-an-action.md`](docs/writing-an-action.md) and
 
 Every request on the direct transport (`createDirectAuth`) goes through `guardedFetch`, which
 refuses a target that is not publicly routable: private, loopback, link-local (cloud metadata
-included), carrier-grade NAT and reserved ranges, in every IPv6 spelling. A hostname is judged on
-the address the connection actually dials, and every redirect hop is judged again. The refusal is
-an `ActionError` with code `ssrf_blocked`.
+included), carrier-grade NAT and reserved ranges, in every IPv6 spelling. Only `64:ff9b::/96` and
+`64:ff9b:1::/96` are judged by the IPv4 address they carry; on a DNS64 network with another
+local-use prefix, allowlist the hostnames you call. A hostname is judged on the very address the
+connection then dials, with or without a proxy, and every redirect hop is judged again.
 
+- **Errors:** a refused target is an `ActionError` with code `ssrf_blocked`. `unresolvable_host`
+  means a name had to be judged and could not be resolved. A network failure is
+  `transport_unreachable` when the request never left this machine, `transport_interrupted` when the
+  connection broke once it may have gone out (a non-idempotent request is not resent then), and
+  `invalid_input` when the request could not be built.
 - **Letting a host in:** list it in `ORCHESTR_HTTP_ALLOWED_HOSTS`, comma-separated hostnames or IP
-  addresses. An entry is matched after URL normalisation and covers every port; a scheme or port
-  in an entry is stripped, and an entry that still is not a host (a range, a wildcard, a path) is
-  ignored with a warning.
-- **Proxies:** with Node's `NODE_USE_ENV_PROXY=1` (or `--use-env-proxy`) and `HTTP(S)_PROXY`
-  set, requests go through the proxy and `NO_PROXY` is honoured. A proxied target is judged on
-  this machine's DNS before the send; the proxy resolves it again, so restrict egress at the
-  proxy too.
+  addresses. An entry is matched after URL normalisation (`127.1` is `127.0.0.1`) and allows every
+  port and scheme on that host, so an entry that names a port or scheme is ignored rather than
+  widened, as is one that is not a host (a range, a wildcard, a path). Each ignored entry is
+  reported once with `process.emitWarning`.
+- **Proxies:** with Node's `NODE_USE_ENV_PROXY=1` (or `--use-env-proxy`) and `HTTP(S)_PROXY` set,
+  requests go through the proxy and `NO_PROXY` is honoured. The target is resolved and judged on
+  this machine, and the tunnel is opened to that address (`CONNECT 93.184.215.14:443`), with TLS
+  still verified against the hostname. A proxy that allows destinations by domain name only must
+  therefore also allow those addresses. A name this machine cannot resolve is refused; allowlisting
+  it sends it to the proxy by name, unjudged, leaving the proxy as the only control for it.
 - **Ahead of time:** `guardUserUrl(url)` checks a URL without sending anything, for validating
-  input on save. A host that does not resolve fails it with code `unresolvable_host`.
+  input on save.
 - **Tests:** passing `fetchImpl` to `createDirectAuth` replaces `guardedFetch` and so switches
   the guard off.
 
@@ -91,25 +100,25 @@ an `ActionError` with code `ssrf_blocked`.
 Auth-free utility actions with zero runtime dependencies (Node built-ins only) — they run
 in-process and offline:
 
-| App | Actions | App | Actions |
-|---|---|---|---|
-| `http` | `send_request`, `parse_url` | `crypto` | hash, hmac, rsa, base64, password |
-| `text` | concat, replace, split, find, … | `csv` | csv ↔ json |
-| `date` | format, diff, add/subtract, … | `xml` | json → xml |
-| `math` | add, subtract, multiply, divide, mod, random | `data_mapper` | field mapping |
-| `json` | to-text, to-json, merge | `graphql` | `send_request` |
-| `hackernews` | `fetch_top_stories` | `binance` | `fetch_crypto_pair_price` |
+| App          | Actions                                      | App           | Actions                           |
+| ------------ | -------------------------------------------- | ------------- | --------------------------------- |
+| `http`       | `send_request`, `parse_url`                  | `crypto`      | hash, hmac, rsa, base64, password |
+| `text`       | concat, replace, split, find, …              | `csv`         | csv ↔ json                        |
+| `date`       | format, diff, add/subtract, …                | `xml`         | json → xml                        |
+| `math`       | add, subtract, multiply, divide, mod, random | `data_mapper` | field mapping                     |
+| `json`       | to-text, to-json, merge                      | `graphql`     | `send_request`                    |
+| `hackernews` | `fetch_top_stories`                          | `binance`     | `fetch_crypto_pair_price`         |
 
 Utility actions that use a vetted, permissively-licensed library (MIT/Apache/BSD/ISC only):
 
-| App | Actions | Library |
-|---|---|---|
-| `pdf` | extract text, page count, create, merge, split, stamp text/image | `pdf-lib`, `unpdf` |
-| `qrcode` | `text_to_qrcode` | `qrcode` |
-| `text` | markdown ↔ html, extract from html | `showdown`, `turndown`, `node-html-parser` |
-| `json` | `run_jsonata_query` | `jsonata` |
-| `csv` | `convert_excel_to_csv` | `exceljs` |
-| `xml` | `convert_xml_to_json` | `fast-xml-parser` |
+| App      | Actions                                                          | Library                                    |
+| -------- | ---------------------------------------------------------------- | ------------------------------------------ |
+| `pdf`    | extract text, page count, create, merge, split, stamp text/image | `pdf-lib`, `unpdf`                         |
+| `qrcode` | `text_to_qrcode`                                                 | `qrcode`                                   |
+| `text`   | markdown ↔ html, extract from html                               | `showdown`, `turndown`, `node-html-parser` |
+| `json`   | `run_jsonata_query`                                              | `jsonata`                                  |
+| `csv`    | `convert_excel_to_csv`                                           | `exceljs`                                  |
+| `xml`    | `convert_xml_to_json`                                            | `fast-xml-parser`                          |
 
 Plus reference provider actions and triggers for Slack and GitHub, and polling triggers
 (`http.new_item`, `hackernews.new_story`, `rss.new_item`, `slack.new_channel`).

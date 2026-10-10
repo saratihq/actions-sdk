@@ -1,4 +1,11 @@
-import { ActionError, isRetryableStatus, normalizeError, redactSecrets } from './errors';
+import {
+  ActionError,
+  failureReason,
+  isRetryableStatus,
+  normalizeError,
+  redactSecrets,
+  transportFailure,
+} from './errors';
 
 describe('isRetryableStatus', () => {
   it.each([
@@ -69,5 +76,79 @@ describe('ActionError', () => {
   it('scrubs secrets from the message', () => {
     const err = new ActionError({ message: 'failed for token xoxb-1-secretvalue' });
     expect(err.message).not.toContain('secretvalue');
+  });
+});
+
+describe('transportFailure', () => {
+  const coded = (message: string, code: string): Error => Object.assign(new Error(message), { code });
+
+  it('keeps the reason when every address of a dual-stack name refused (an AggregateError with no message)', () => {
+    const refused = Object.assign(
+      new AggregateError([
+        coded('connect ECONNREFUSED ::1:1', 'ECONNREFUSED'),
+        coded('connect ECONNREFUSED 127.0.0.1:1', 'ECONNREFUSED'),
+      ]),
+      { code: 'ECONNREFUSED' },
+    );
+    expect(refused.message).toBe('');
+    expect(transportFailure('http://localhost:1', refused, 'request')).toMatchObject({
+      code: 'transport_unreachable',
+      retryable: true,
+      message:
+        'could not reach http://localhost:1: connect ECONNREFUSED ::1:1; connect ECONNREFUSED 127.0.0.1:1',
+      detail: {
+        origin: 'http://localhost:1',
+        reason: 'connect ECONNREFUSED ::1:1; connect ECONNREFUSED 127.0.0.1:1',
+      },
+    });
+  });
+
+  it.each([
+    ['ENOTFOUND', 'getaddrinfo ENOTFOUND x.example'],
+    ['UND_ERR_CONNECT_TIMEOUT', 'Connect Timeout Error'],
+    ['CERT_HAS_EXPIRED', 'certificate has expired'],
+    ['ERR_TLS_CERT_ALTNAME_INVALID', "Hostname/IP does not match certificate's altnames"],
+  ])('calls %s a host never reached, safe to send again', (code, message) => {
+    expect(transportFailure('https://x.example', coded(message, code), 'request')).toMatchObject({
+      code: 'transport_unreachable',
+      message: `could not reach https://x.example: ${message}`,
+    });
+  });
+
+  it.each([
+    ['UND_ERR_NOT_SUPPORTED', 'expect header not supported'],
+    ['UND_ERR_INVALID_ARG', 'invalid keep-alive header'],
+  ])('calls %s a request that could not be built: invalid input, never retried', (code, message) => {
+    expect(transportFailure('https://x.example', coded(message, code), 'request')).toMatchObject({
+      code: 'invalid_input',
+      retryable: false,
+      message: `the request to https://x.example could not be sent: ${message}`,
+    });
+  });
+
+  it.each([['UND_ERR_SOCKET'], ['ECONNRESET'], ['UND_ERR_HEADERS_TIMEOUT'], ['SOMETHING_NEW']])(
+    'calls %s a connection that may have carried the request',
+    (code) => {
+      expect(
+        transportFailure('https://x.example', coded('other side closed', code), 'request'),
+      ).toMatchObject({
+        code: 'transport_interrupted',
+        message:
+          'the connection to https://x.example broke possibly after the request was sent: other side closed',
+      });
+    },
+  );
+
+  it('says a failure while reading the body happened there', () => {
+    expect(
+      transportFailure('https://x.example', coded('other side closed', 'UND_ERR_SOCKET'), 'response'),
+    ).toMatchObject({
+      code: 'transport_interrupted',
+      message: 'the connection to https://x.example broke while reading the response: other side closed',
+    });
+  });
+
+  it('falls back to the code when a failure carries no message', () => {
+    expect(failureReason(coded('', 'ECONNREFUSED'))).toBe('ECONNREFUSED');
   });
 });

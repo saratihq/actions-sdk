@@ -16,6 +16,7 @@ export type ActionErrorCode =
   | 'auth_missing'
   | 'auth_unsupported'
   | 'transport_unreachable'
+  | 'transport_interrupted'
   | 'transport_timeout'
   | 'http_error'
   | 'provider_error'
@@ -64,30 +65,94 @@ export function isRetryableStatus(status: number): boolean {
   return status >= 500 && status <= 599;
 }
 
+// The request never left this machine: safe to send again whatever the method.
+const CONNECT_STAGE = new Set([
+  'ECONNREFUSED',
+  'ETIMEDOUT',
+  'EAI_AGAIN',
+  'ENOTFOUND',
+  'EHOSTUNREACH',
+  'ENETUNREACH',
+  'UND_ERR_CONNECT_TIMEOUT',
+]);
+// The connection broke once the request may have gone out.
+const IN_FLIGHT = new Set([
+  'ECONNRESET',
+  'EPIPE',
+  'UND_ERR_HEADERS_TIMEOUT',
+  'UND_ERR_BODY_TIMEOUT',
+  'UND_ERR_SOCKET',
+]);
+const INVALID_REQUEST = new Set(['UND_ERR_INVALID_ARG', 'UND_ERR_NOT_SUPPORTED']);
+const TLS_HANDSHAKE = /^ERR_(TLS|SSL)_|CERT|SIGNATURE/;
+
+function codeOf(err: unknown): string {
+  const code = (err as { code?: unknown } | null)?.code;
+  return typeof code === 'string' ? code : '';
+}
+
+function nested(err: unknown): unknown[] {
+  const errors = (err as { errors?: unknown } | null)?.errors;
+  return Array.isArray(errors) ? errors : [];
+}
+
+/** A failure's reason in words, reading an AggregateError's inner errors (a host whose every address failed). */
+export function failureReason(err: unknown): string {
+  const inner = nested(err);
+  if (inner.length > 0) return [...new Set(inner.map(failureReason))].join('; ');
+  const { message, name } = err as { message?: string; name?: string };
+  return message || codeOf(err) || name || 'unknown error';
+}
+
+function neverSent(err: unknown): boolean {
+  const inner = nested(err);
+  if (inner.length > 0) return inner.every(neverSent);
+  const code = codeOf(err);
+  return CONNECT_STAGE.has(code) || TLS_HANDSHAKE.test(code);
+}
+
+/** Classify a broken network hop by where it broke: a request that could not be built, a host never reached, or a connection lost once the request may have gone out. */
+export function transportFailure(origin: string, cause: Error, stage: 'request' | 'response'): ActionError {
+  const reason = failureReason(cause);
+  const detail = { origin, reason };
+  if (stage === 'request' && INVALID_REQUEST.has(codeOf(cause))) {
+    return new ActionError({
+      code: 'invalid_input',
+      message: `the request to ${origin} could not be sent: ${reason}`,
+      retryable: false,
+      cause,
+      detail,
+    });
+  }
+  if (stage === 'request' && neverSent(cause)) {
+    return new ActionError({
+      code: 'transport_unreachable',
+      message: `could not reach ${origin}: ${reason}`,
+      retryable: true,
+      cause,
+      detail,
+    });
+  }
+  const when = stage === 'response' ? 'while reading the response' : 'possibly after the request was sent';
+  return new ActionError({
+    code: 'transport_interrupted',
+    message: `the connection to ${origin} broke ${when}: ${reason}`,
+    retryable: true,
+    cause,
+    detail,
+  });
+}
+
 /** Normalise ANY thrown value to {@link NormalizedFailure}; unrecognised throws are non-retryable so a bug never spins a retry loop. */
 export function normalizeError(err: unknown): NormalizedFailure {
   if (err instanceof ActionError) return err.toFailure();
 
   if (err instanceof Error) {
-    const rawCode = (err as { code?: unknown }).code;
-    const code = typeof rawCode === 'string' ? rawCode : '';
-    // fetch/undici/Node network codes → status 0, retryable.
-    const NETWORKISH = new Set([
-      'ECONNRESET',
-      'ECONNREFUSED',
-      'ETIMEDOUT',
-      'EAI_AGAIN',
-      'ENOTFOUND',
-      'EPIPE',
-      'UND_ERR_CONNECT_TIMEOUT',
-      'UND_ERR_HEADERS_TIMEOUT',
-      'UND_ERR_BODY_TIMEOUT',
-      'UND_ERR_SOCKET',
-    ]);
+    const code = codeOf(err);
     if (err.name === 'AbortError' || code === 'ABORT_ERR') {
       return { status: 0, message: redactSecrets(err.message || 'request aborted'), retryable: true };
     }
-    if (NETWORKISH.has(code)) {
+    if (CONNECT_STAGE.has(code) || IN_FLIGHT.has(code)) {
       return { status: 0, message: redactSecrets(err.message || code), retryable: true };
     }
     return { status: 0, message: redactSecrets(err.message || 'unexpected error'), retryable: false };

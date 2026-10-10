@@ -1,5 +1,5 @@
 import { withAllowedHosts } from '../../testing/loopback-server';
-import { assertPublicUrl, isBlockedIp, preflightTarget, ssrfAllowedHostsFromEnv } from './ssrf';
+import { assertPublicUrl, guardUserUrl, isBlockedIp, preflightTarget, ssrfAllowedHostsFromEnv } from './ssrf';
 
 describe('SSRF guard — isBlockedIp', () => {
   it.each<[string, boolean]>([
@@ -131,7 +131,7 @@ describe('SSRF guard — assertPublicUrl', () => {
     ).resolves.toBeUndefined();
   });
 
-  it('matches the allowlist exactly, so another spelling of an allowed address is still refused', async () => {
+  it('an IPv4 entry does not admit the IPv4-mapped IPv6 spelling of that address', async () => {
     await expect(
       assertPublicUrl('http://[::ffff:127.0.0.1]:8001/x', { allowedHosts: ['127.0.0.1'] }),
     ).rejects.toMatchObject({ code: 'ssrf_blocked' });
@@ -139,26 +139,41 @@ describe('SSRF guard — assertPublicUrl', () => {
 });
 
 describe('SSRF guard — ssrfAllowedHostsFromEnv', () => {
-  it('normalises entries the way a URL writes its hostname, and warns once about each unusable one', async () => {
+  it('normalises the spelling of a bare host, refuses rather than widens an entry naming a port or scheme, and warns once each', async () => {
     const warn = jest.spyOn(process, 'emitWarning').mockImplementation(() => undefined);
     try {
       const raw =
-        ' http://Example.COM:8080/ , [::1], 0:0:0:0:0:0:0:1, localhost:3000, 127.1, ::FFFF:127.0.0.1, 192.168.1.0/24, *.corp, user:pw@host ';
+        ' http://Example.COM:8080/ , [::1], 0:0:0:0:0:0:0:1, localhost:3000, localhost:80, https://jira.internal, 127.1, ::FFFF:127.0.0.1, 192.168.1.0/24, *.corp, .corp, user:pw@host ';
       const hosts = await withAllowedHosts(raw, () => Promise.resolve(ssrfAllowedHostsFromEnv()));
-      expect(hosts).toEqual(['example.com', '::1', '::1', 'localhost', '127.0.0.1', '::ffff:7f00:1']);
+      expect(hosts).toEqual(['::1', '::1', '127.0.0.1', '::ffff:7f00:1']);
       const warned = warn.mock.calls.map(([message]) => String(message));
+      const widened = (entry: string, host: string): string =>
+        `ORCHESTR_HTTP_ALLOWED_HOSTS entry "${entry}" is ignored: an entry allows every port and scheme on its host; write "${host}" if that is what you mean`;
+      const notAHost = (entry: string): string =>
+        `ORCHESTR_HTTP_ALLOWED_HOSTS entry "${entry}" is ignored: list a bare hostname or IP address, not a range, wildcard, path or credentials`;
       expect(warned).toEqual([
-        'ORCHESTR_HTTP_ALLOWED_HOSTS entry "http://Example.COM:8080/" names a port, which is ignored: it allows every port on example.com',
-        'ORCHESTR_HTTP_ALLOWED_HOSTS entry "localhost:3000" names a port, which is ignored: it allows every port on localhost',
-        'ORCHESTR_HTTP_ALLOWED_HOSTS entry "192.168.1.0/24" is ignored: list a bare hostname or IP address, not a range, wildcard, path or credentials',
-        'ORCHESTR_HTTP_ALLOWED_HOSTS entry "*.corp" is ignored: list a bare hostname or IP address, not a range, wildcard, path or credentials',
-        'ORCHESTR_HTTP_ALLOWED_HOSTS entry "user:pw@host" is ignored: list a bare hostname or IP address, not a range, wildcard, path or credentials',
+        widened('http://Example.COM:8080/', 'example.com'),
+        widened('localhost:3000', 'localhost'),
+        widened('localhost:80', 'localhost'),
+        widened('https://jira.internal', 'jira.internal'),
+        notAHost('192.168.1.0/24'),
+        notAHost('*.corp'),
+        notAHost('.corp'),
+        notAHost('user:pw@host'),
       ]);
       await withAllowedHosts(`${raw},`, () => Promise.resolve(ssrfAllowedHostsFromEnv()));
-      expect(warn).toHaveBeenCalledTimes(5);
+      expect(warn).toHaveBeenCalledTimes(8);
     } finally {
       warn.mockRestore();
     }
+  });
+
+  it('hands out a copy, so changing what it returns cannot widen the guard', async () => {
+    await withAllowedHosts('api.internal', async () => {
+      ssrfAllowedHostsFromEnv().push('127.0.0.1');
+      expect(ssrfAllowedHostsFromEnv()).toEqual(['api.internal']);
+      await expect(guardUserUrl('http://127.0.0.1:9/')).rejects.toMatchObject({ code: 'ssrf_blocked' });
+    });
   });
 
   it('lets a bracketed IPv6 entry match its URL', () => {

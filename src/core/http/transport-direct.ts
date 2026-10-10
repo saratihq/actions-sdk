@@ -1,5 +1,7 @@
+import { isNativeError } from 'node:util/types';
+
 import type { AuthScheme, DirectCredential } from '../auth';
-import { ActionError } from '../errors';
+import { ActionError, transportFailure } from '../errors';
 import { encodeForm } from './form';
 import { guardedFetch } from './guarded-fetch';
 import { encodeMultipart } from './multipart';
@@ -49,10 +51,12 @@ export class DirectTransport implements Transport {
     });
     // Binary hands back raw bytes verbatim — text-decoding them would corrupt the file.
     if (prepared.responseType === 'binary') {
-      const bytes = Buffer.from(await res.arrayBuffer());
+      const bytes = await readBody(prepared.url, () =>
+        res.arrayBuffer().then((buffer) => Buffer.from(buffer)),
+      );
       return { status: res.status, headers, data: bytes };
     }
-    const text = await res.text();
+    const text = await readBody(prepared.url, () => res.text());
     return { status: res.status, headers, data: parseBody(text, headers['content-type']) };
   }
 
@@ -113,6 +117,17 @@ export class DirectTransport implements Transport {
       }
     }
     return prepared;
+  }
+}
+
+async function readBody<T>(url: string, read: () => Promise<T>): Promise<T> {
+  try {
+    return await read();
+  } catch (err) {
+    if (err instanceof ActionError) throw err;
+    const cause = (err as { cause?: unknown } | null)?.cause;
+    const reason = isNativeError(cause) ? cause : isNativeError(err) ? err : new Error(String(err));
+    throw transportFailure(new URL(url).origin, reason, 'response');
   }
 }
 

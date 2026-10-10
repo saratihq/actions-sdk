@@ -79,26 +79,38 @@ export interface ConnectProxy {
   close(): Promise<void>;
 }
 
-/** Start a {@link ConnectProxy} that splices every tunnel, whatever its target, to `upstreamPort` on 127.0.0.1. */
-export async function startConnectProxy(upstreamPort: number): Promise<ConnectProxy> {
+/** Where a {@link ConnectProxy} sends a tunnel: a port to splice to (on 127.0.0.1 unless `host` says), or a status to refuse it with. */
+export type TunnelRoute = { host?: string; port: number } | { status: number };
+
+/** Start a {@link ConnectProxy}; `route` decides each tunnel from the authority it was asked for (a port splices every tunnel there). */
+export async function startConnectProxy(
+  route: number | ((authority: string, index: number) => TunnelRoute),
+): Promise<ConnectProxy> {
   const tunnels: string[] = [];
   const sockets = new Set<Socket>();
+  const decide = typeof route === 'number' ? (): TunnelRoute => ({ port: route }) : route;
   const server = createServer((_req, res) => {
     res.writeHead(405);
     res.end();
   });
   server.on('connect', (req: IncomingMessage, client: Socket, head: Buffer) => {
-    tunnels.push(req.url ?? '');
-    const upstream = connect(upstreamPort, '127.0.0.1', () => {
+    const authority = req.url ?? '';
+    const decision = decide(authority, tunnels.length);
+    tunnels.push(authority);
+    sockets.add(client);
+    client.on('error', () => client.destroy());
+    if ('status' in decision) {
+      client.end(`HTTP/1.1 ${decision.status} Refused\r\n\r\n`);
+      return;
+    }
+    const upstream = connect(decision.port, decision.host ?? '127.0.0.1', () => {
       client.write('HTTP/1.1 200 Connection Established\r\n\r\n');
       upstream.write(head);
       upstream.pipe(client);
       client.pipe(upstream);
     });
-    for (const socket of [client, upstream]) {
-      sockets.add(socket);
-      socket.on('error', () => socket.destroy());
-    }
+    sockets.add(upstream);
+    upstream.on('error', () => client.destroy());
   });
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
   const { port } = server.address() as AddressInfo;

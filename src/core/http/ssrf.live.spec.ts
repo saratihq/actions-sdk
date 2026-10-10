@@ -60,27 +60,58 @@ liveDescribe('SSRF guard — live, real sockets', () => {
     expect(out.body.args).toEqual({ proof: 'guarded' });
   });
 
-  it('behind an env proxy, judges a real public name on this server and tunnels it through the proxy', async () => {
+  const proxyEnv = (proxy: Record<string, string>): Record<string, string | undefined> => ({
+    NODE_USE_ENV_PROXY: '1',
+    HTTP_PROXY: undefined,
+    HTTPS_PROXY: undefined,
+    http_proxy: undefined,
+    https_proxy: undefined,
+    NO_PROXY: undefined,
+    no_proxy: undefined,
+    ORCHESTR_HTTP_ALLOWED_HOSTS: '',
+    ...proxy,
+  });
+
+  it('behind an env proxy, judges a real public name here and tunnels to the address it judged', async () => {
     const proxy = await startConnectProxy(server.port);
     try {
-      const env = {
-        NODE_USE_ENV_PROXY: '1',
-        HTTP_PROXY: `http://127.0.0.1:${proxy.port}`,
-        ORCHESTR_HTTP_ALLOWED_HOSTS: '',
-      };
+      const env = proxyEnv({ HTTP_PROXY: `http://localhost:${proxy.port}` });
       const out = (await withEnv(env, () =>
         sendRequest.execute({ auth, props: { method: 'GET', url: 'http://example.com/via-proxy' } }),
       )) as { status: number };
       expect(out.status).toBe(200);
-      expect(proxy.tunnels).toEqual(['example.com:80']);
+      expect(proxy.tunnels).toHaveLength(1);
+      expect(proxy.tunnels[0]).toMatch(/^(\d+\.){3}\d+:80$|^\[[0-9a-f:]+\]:80$/);
       await expect(
         withEnv(env, () =>
           sendRequest.execute({ auth, props: { method: 'GET', url: 'http://localtest.me/' } }),
         ),
       ).rejects.toMatchObject({ code: 'ssrf_blocked' });
-      expect(proxy.tunnels).toEqual(['example.com:80']);
+      expect(proxy.tunnels).toHaveLength(1);
     } finally {
       await proxy.close();
+    }
+  });
+
+  it('behind an env proxy, reaches a real https site through a tunnel to the judged address, TLS verified on the name', async () => {
+    const forwarding = await startConnectProxy((authority) => {
+      const split = authority.lastIndexOf(':');
+      return {
+        host: authority.slice(0, split).replace(/^\[|\]$/g, ''),
+        port: Number(authority.slice(split + 1)),
+      };
+    });
+    try {
+      const env = proxyEnv({ HTTPS_PROXY: `http://localhost:${forwarding.port}` });
+      const out = (await withEnv(env, () =>
+        sendRequest.execute({ auth, props: { method: 'GET', url: 'https://example.com/' } }),
+      )) as { status: number; body: unknown };
+      expect(out.status).toBe(200);
+      expect(String(out.body)).toContain('Example Domain');
+      expect(forwarding.tunnels).toHaveLength(1);
+      expect(forwarding.tunnels[0]).toMatch(/^(\d+\.){3}\d+:443$|^\[[0-9a-f:]+\]:443$/);
+    } finally {
+      await forwarding.close();
     }
   });
 });
