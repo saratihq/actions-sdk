@@ -139,6 +139,14 @@ describe('transportFailure', () => {
     },
   );
 
+  it("calls fetch's own codeless refusal (a bad port) a request that could not be sent", () => {
+    expect(transportFailure('http://127.0.0.1:9', new Error('bad port'), 'request')).toMatchObject({
+      code: 'invalid_input',
+      retryable: false,
+      message: 'the request to http://127.0.0.1:9 could not be sent: bad port',
+    });
+  });
+
   it('says a failure while reading the body happened there', () => {
     expect(
       transportFailure('https://x.example', coded('other side closed', 'UND_ERR_SOCKET'), 'response'),

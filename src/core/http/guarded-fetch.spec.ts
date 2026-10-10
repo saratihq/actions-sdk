@@ -266,6 +266,15 @@ describe('guardedFetch — request shape and failures', () => {
     expect(server.hits).toHaveLength(0);
   });
 
+  it('refuses a port fetch will not use as invalid input', async () => {
+    await withAllowedHosts('127.0.0.1', async () => {
+      await expect(guardedFetch('http://127.0.0.1:9/feed.xml')).rejects.toMatchObject({
+        code: 'invalid_input',
+        message: 'the request to http://127.0.0.1:9 could not be sent: bad port',
+      });
+    });
+  });
+
   it('does not resend a POST whose connection dropped once the request reached the server', async () => {
     const http = new HttpClient({ retry: { baseDelayMs: 1, maxDelayMs: 1 } });
     await withAllowedHosts('127.0.0.1', async () => {

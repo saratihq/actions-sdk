@@ -115,7 +115,9 @@ function neverSent(err: unknown): boolean {
 export function transportFailure(origin: string, cause: Error, stage: 'request' | 'response'): ActionError {
   const reason = failureReason(cause);
   const detail = { origin, reason };
-  if (stage === 'request' && INVALID_REQUEST.has(codeOf(cause))) {
+  // fetch's own refusals (a bad port) carry no code and never leave this machine.
+  const refusedByFetch = codeOf(cause) === '' && nested(cause).length === 0;
+  if (stage === 'request' && (INVALID_REQUEST.has(codeOf(cause)) || refusedByFetch)) {
     return new ActionError({
       code: 'invalid_input',
       message: `the request to ${origin} could not be sent: ${reason}`,
