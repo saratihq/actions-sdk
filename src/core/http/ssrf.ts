@@ -175,18 +175,18 @@ export function preflightTarget(url: URL, allowed: readonly string[]): string | 
   return null;
 }
 
-/** Resolve `host` here and return the address to dial, refusing it unless every address it resolves to is public. */
-export async function publicAddress(host: string): Promise<string> {
+/** Resolve `host` here and return its addresses to dial, IPv4 first, refusing it unless every one is public. */
+export async function publicAddresses(host: string): Promise<string[]> {
   let addresses: LookupAddress[];
   try {
     addresses = await lookup(host, { all: true });
   } catch (err) {
     throw unresolvable(host, err);
   }
-  const [first] = addresses;
-  if (!first) throw unresolvable(host);
+  if (addresses.length === 0) throw unresolvable(host);
   if (addresses.some((a) => isBlockedIp(a.address))) throw ssrfRefusal(host);
-  return first.address;
+  // Egress proxies reach IPv4 far more reliably than IPv6, so a dual-stack name is tried on IPv4 first.
+  return [...addresses].sort((a, b) => Number(b.family === 4) - Number(a.family === 4)).map((a) => a.address);
 }
 
 /** Ahead-of-time check that `rawUrl` is http(s) and EVERY address its host resolves to is public; an unresolvable host fails closed. */
@@ -198,7 +198,7 @@ export async function assertPublicUrl(rawUrl: string, opts: { allowedHosts?: str
     throw new ActionError({ code: 'invalid_input', message: `invalid URL: "${rawUrl}"`, retryable: false });
   }
   const host = preflightTarget(url, opts.allowedHosts ?? []);
-  if (host !== null) await publicAddress(host);
+  if (host !== null) await publicAddresses(host);
 }
 
 /** Validate a user-supplied URL ahead of time (e.g. on save); requests themselves are re-checked per hop by {@link guardedFetch}. */

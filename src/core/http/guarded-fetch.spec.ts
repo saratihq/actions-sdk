@@ -7,7 +7,12 @@ import {
   withEnv,
 } from '../../testing/loopback-server';
 import dns from 'node:dns';
-import { isIP } from 'node:net';
+import { readFileSync } from 'node:fs';
+import type { Server } from 'node:https';
+import { createServer as createHttpsServer } from 'node:https';
+import { type AddressInfo, isIP } from 'node:net';
+import { join } from 'node:path';
+import tls from 'node:tls';
 
 import { createDirectAuth } from '../auth-factories';
 import { HttpClient } from './client';
@@ -16,30 +21,31 @@ import { ssrfSafeLookup } from './ssrf';
 import { DirectTransport } from './transport-direct';
 
 /** Answer `answers`' names from a fixed table and every other name from the real resolver; returns the undo. */
-function stubDns(answers: Record<string, string>): () => void {
+function stubDns(answers: Record<string, string | string[]>): () => void {
   const realLookup = dns.lookup.bind(dns);
   const realPromise = dns.promises.lookup.bind(dns.promises);
-  const record = (hostname: string) => {
-    const address = answers[hostname];
-    return address === undefined ? undefined : { address, family: isIP(address) };
+  const records = (hostname: string) => {
+    const answer = answers[hostname];
+    if (answer === undefined) return undefined;
+    return (Array.isArray(answer) ? answer : [answer]).map((address) => ({ address, family: isIP(address) }));
   };
   const callback = jest.spyOn(dns, 'lookup').mockImplementation(((
     hostname: string,
     options: { all?: boolean },
     done: (err: null, address: unknown, family?: number) => void,
   ) => {
-    const found = record(hostname);
-    if (!found) return realLookup(hostname, options as never, done as never);
-    if (options.all) return done(null, [found]);
-    return done(null, found.address, found.family);
+    const found = records(hostname);
+    if (!found?.[0]) return realLookup(hostname, options as never, done as never);
+    if (options.all) return done(null, found);
+    return done(null, found[0].address, found[0].family);
   }) as never);
   const promise = jest.spyOn(dns.promises, 'lookup').mockImplementation((async (
     hostname: string,
     options: { all?: boolean },
   ) => {
-    const found = record(hostname);
-    if (!found) return realPromise(hostname, options as never);
-    return options.all ? [found] : found;
+    const found = records(hostname);
+    if (!found?.[0]) return realPromise(hostname, options as never);
+    return options.all ? found : found[0];
   }) as never);
   return () => {
     callback.mockRestore();
@@ -424,6 +430,59 @@ describe('guardedFetch — behind an env proxy', () => {
     }
   });
 
+  it('tunnels a dual-stack name to its IPv4 address, which an egress proxy is far likelier to reach', async () => {
+    restoreDns = stubDns({ 'dual.test': ['2606:4700:4700::1111', '93.184.215.14'] });
+    await withEnv(proxyEnv(), () => guardedFetch('http://dual.test/x'));
+    expect(proxy.tunnels).toEqual(['93.184.215.14:80']);
+  });
+
+  it('moves on to the next judged address when the proxy cannot reach the first (502)', async () => {
+    const picky = await startConnectProxy((authority) =>
+      authority.startsWith('93.184.215.14:') ? { status: 502 } : { port: server.port },
+    );
+    restoreDns = stubDns({ 'multi.test': ['2606:4700:4700::1111', '93.184.215.14', '93.184.215.15'] });
+    try {
+      const res = await withEnv(proxyEnv({ HTTP_PROXY: `http://localhost:${picky.port}` }), () =>
+        guardedFetch('http://multi.test/x'),
+      );
+      expect(await res.text()).toBe('reached');
+      expect(picky.tunnels).toEqual(['93.184.215.14:80', '93.184.215.15:80']);
+    } finally {
+      await picky.close();
+    }
+  });
+
+  it('does not try other addresses when the proxy refuses on policy (407)', async () => {
+    const refusing = await startConnectProxy(() => ({ status: 407 }));
+    restoreDns = stubDns({ 'multi.test': ['93.184.215.14', '93.184.215.15'] });
+    try {
+      await withEnv(proxyEnv({ HTTP_PROXY: `http://localhost:${refusing.port}` }), async () => {
+        await expect(guardedFetch('http://multi.test/x')).rejects.toMatchObject({
+          message: 'the egress proxy refused the tunnel to http://multi.test (407)',
+        });
+      });
+      expect(refusing.tunnels).toEqual(['93.184.215.14:80']);
+    } finally {
+      await refusing.close();
+    }
+  });
+
+  it('gives up on a proxy that never answers the tunnel request, well inside a request budget', async () => {
+    const hung = await startConnectProxy(() => ({ hang: true }));
+    const started = Date.now();
+    try {
+      await withEnv(proxyEnv({ HTTP_PROXY: `http://localhost:${hung.port}` }), async () => {
+        await expect(guardedFetch('http://93.184.215.14/x')).rejects.toMatchObject({
+          code: 'transport_unreachable',
+          message: 'the egress proxy did not answer the tunnel request on the way to http://93.184.215.14',
+        });
+      });
+      expect(Date.now() - started).toBeLessThan(15_000);
+    } finally {
+      await hung.close();
+    }
+  }, 20_000);
+
   it('sends an https target through HTTPS_PROXY, tunnelled to the judged address', async () => {
     const httpsProxy = await startConnectProxy(server.port);
     restoreDns = stubDns({ 'rebind.test': '93.184.215.14' });
@@ -573,5 +632,100 @@ describe('ssrfSafeLookup', () => {
       });
       await expect(resolve('localhost', false)).resolves.toMatchObject({ address: expect.any(String) });
     });
+  });
+});
+
+describe('guardedFetch — TLS to the proxy and over the tunnel', () => {
+  const fixture = (name: string): string =>
+    readFileSync(join(__dirname, '../../testing/fixtures', name), 'utf8');
+  const tlsFixture = { key: fixture('test-only-tls.key.pem'), cert: fixture('test-only-tls.cert.pem') };
+  const defaultCAs = tls.getCACertificates('default');
+  let secure: Server;
+  let securePort: number;
+  let plain: LoopbackServer;
+  let restoreDns: () => void;
+
+  const env = (proxy: Record<string, string>): Record<string, string | undefined> => ({
+    NODE_USE_ENV_PROXY: '1',
+    HTTP_PROXY: undefined,
+    HTTPS_PROXY: undefined,
+    http_proxy: undefined,
+    https_proxy: undefined,
+    NO_PROXY: undefined,
+    no_proxy: undefined,
+    ORCHESTR_HTTP_ALLOWED_HOSTS: '',
+    ...proxy,
+  });
+
+  beforeAll(async () => {
+    tls.setDefaultCACertificates([...defaultCAs, tlsFixture.cert]);
+    secure = createHttpsServer(tlsFixture, (req, res) => res.end(`secure ${req.url}`));
+    await new Promise<void>((resolve) => secure.listen(0, '127.0.0.1', resolve));
+    securePort = (secure.address() as AddressInfo).port;
+    plain = await startLoopbackServer();
+    restoreDns = stubDns({ 'secure.test': '93.184.215.14', 'other.test': '93.184.215.14' });
+  });
+
+  afterAll(async () => {
+    restoreDns();
+    tls.setDefaultCACertificates(defaultCAs);
+    secure.closeAllConnections();
+    await new Promise<void>((resolve) => secure.close(() => resolve()));
+    await plain.close();
+  });
+
+  it('opens the tunnel inside TLS to an https:// proxy', async () => {
+    const proxy = await startConnectProxy(plain.port, { tls: tlsFixture });
+    try {
+      const res = await withEnv(env({ HTTP_PROXY: `https://localhost:${proxy.port}` }), () =>
+        guardedFetch('http://93.184.215.14/plain'),
+      );
+      expect(await res.text()).toBe('reached');
+      expect(proxy.tunnels).toEqual(['93.184.215.14:80']);
+    } finally {
+      await proxy.close();
+    }
+  });
+
+  it('verifies the target certificate against the hostname over a tunnel opened to its address', async () => {
+    const proxy = await startConnectProxy(securePort);
+    try {
+      const res = await withEnv(env({ HTTPS_PROXY: `http://localhost:${proxy.port}` }), () =>
+        guardedFetch('https://secure.test/x'),
+      );
+      expect(await res.text()).toBe('secure /x');
+      expect(proxy.tunnels).toEqual(['93.184.215.14:443']);
+    } finally {
+      await proxy.close();
+    }
+  });
+
+  it('refuses a target whose certificate does not name it, though the tunnel reached the same address', async () => {
+    const proxy = await startConnectProxy(securePort);
+    try {
+      await withEnv(env({ HTTPS_PROXY: `http://localhost:${proxy.port}` }), async () => {
+        await expect(guardedFetch('https://other.test/x')).rejects.toMatchObject({
+          code: 'transport_unreachable',
+          message: expect.stringContaining(
+            "could not reach https://other.test: Hostname/IP does not match certificate's altnames",
+          ),
+        });
+      });
+    } finally {
+      await proxy.close();
+    }
+  });
+
+  it('runs TLS to the target inside TLS to the proxy', async () => {
+    const proxy = await startConnectProxy(securePort, { tls: tlsFixture });
+    try {
+      const res = await withEnv(env({ HTTPS_PROXY: `https://localhost:${proxy.port}` }), () =>
+        guardedFetch('https://secure.test/nested'),
+      );
+      expect(await res.text()).toBe('secure /nested');
+      expect(proxy.tunnels).toEqual(['93.184.215.14:443']);
+    } finally {
+      await proxy.close();
+    }
   });
 });

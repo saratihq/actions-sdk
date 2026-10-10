@@ -1,4 +1,5 @@
 import { isIP, type Socket } from 'node:net';
+import { isNativeError } from 'node:util/types';
 
 import { Agent, buildConnector, type Dispatcher, Pool } from 'undici';
 
@@ -6,13 +7,15 @@ import { ActionError } from '../errors';
 import {
   allowedHosts,
   isBlockedIp,
-  publicAddress,
+  publicAddresses,
   SSRF_ALLOWLIST_ENV,
   ssrfRefusal,
   ssrfSafeLookup,
 } from './ssrf';
 
 const PROXY_VARS = ['http_proxy', 'HTTP_PROXY', 'https_proxy', 'HTTPS_PROXY', 'no_proxy', 'NO_PROXY'];
+// A proxy that will not connect or answer a tunnel request within this gives up well inside a request's own budget.
+const PROXY_TIMEOUT_MS = 10_000;
 
 interface Proxy {
   pool: Pool;
@@ -59,7 +62,10 @@ function proxyFor(name: string, raw: string | undefined): Proxy | null {
     const credentials = `${decodeURIComponent(url.username)}:${decodeURIComponent(url.password)}`;
     headers['proxy-authorization'] = `Basic ${Buffer.from(credentials).toString('base64')}`;
   }
-  return { pool: new Pool(url.origin), headers };
+  return {
+    pool: new Pool(url.origin, { connectTimeout: PROXY_TIMEOUT_MS, headersTimeout: PROXY_TIMEOUT_MS }),
+    headers,
+  };
 }
 
 // NO_PROXY as undici's EnvHttpProxyAgent reads it, so the direct/proxied split matches Node fetch.
@@ -87,14 +93,14 @@ function shouldProxy({ raw, entries }: NoProxy, hostname: string, port: number):
   );
 }
 
-async function tunnelTarget(hostname: string): Promise<string> {
-  if (allowedHosts().includes(hostname)) return hostname;
+async function tunnelTargets(hostname: string): Promise<string[]> {
+  if (allowedHosts().includes(hostname)) return [hostname];
   if (isIP(hostname)) {
     if (isBlockedIp(hostname)) throw ssrfRefusal(hostname);
-    return hostname;
+    return [hostname];
   }
   try {
-    return await publicAddress(hostname);
+    return await publicAddresses(hostname);
   } catch (err) {
     if (!(err instanceof ActionError) || err.code !== 'unresolvable_host') throw err;
     throw new ActionError({
@@ -106,7 +112,48 @@ async function tunnelTarget(hostname: string): Promise<string> {
   }
 }
 
-// CONNECT to the address judged here, so the proxy never resolves a name of its own.
+function proxyUnreachable(origin: string, cause: unknown): ActionError {
+  const timedOut = (cause as { code?: unknown } | null)?.code === 'UND_ERR_HEADERS_TIMEOUT';
+  const reason = timedOut
+    ? 'the egress proxy did not answer the tunnel request'
+    : 'the egress proxy could not be reached';
+  return new ActionError({
+    code: 'transport_unreachable',
+    message: `${reason} on the way to ${origin}`,
+    retryable: true,
+    cause,
+    detail: { origin, reason },
+  });
+}
+
+// CONNECT to an address judged here, so the proxy never resolves a name of its own; a 5xx from the proxy moves on to the next.
+async function openTunnel(proxy: Proxy, origin: string, targets: string[], port: number): Promise<Socket> {
+  let status = 0;
+  for (const target of targets) {
+    const authority = `${isIP(target) === 6 ? `[${target}]` : target}:${port}`;
+    let connected: Dispatcher.ConnectData;
+    try {
+      connected = await proxy.pool.connect({
+        path: authority,
+        headers: { ...proxy.headers, host: authority },
+      });
+    } catch (cause) {
+      throw proxyUnreachable(origin, cause);
+    }
+    // undici types the tunnel as a Duplex; at runtime it is the net.Socket the proxy connection rides on.
+    if (connected.statusCode === 200) return connected.socket as Socket;
+    connected.socket.destroy();
+    status = connected.statusCode;
+    if (status < 500) break;
+  }
+  throw new ActionError({
+    code: 'transport_unreachable',
+    message: `the egress proxy refused the tunnel to ${origin} (${status})`,
+    retryable: status >= 500,
+    detail: { origin, reason: `the egress proxy refused the tunnel (${status})` },
+  });
+}
+
 async function tunnel(
   proxy: Proxy,
   opts: buildConnector.Options,
@@ -115,31 +162,7 @@ async function tunnel(
   overTunnel: buildConnector.connector,
 ): Promise<Socket> {
   const origin = `${opts.protocol}//${opts.host ?? opts.hostname}`;
-  const target = await tunnelTarget(hostname);
-  const authority = `${isIP(target) === 6 ? `[${target}]` : target}:${port}`;
-  let connected: Dispatcher.ConnectData;
-  try {
-    connected = await proxy.pool.connect({ path: authority, headers: { ...proxy.headers, host: authority } });
-  } catch (cause) {
-    throw new ActionError({
-      code: 'transport_unreachable',
-      message: `the egress proxy could not be reached on the way to ${origin}`,
-      retryable: true,
-      cause,
-      detail: { origin, reason: 'the egress proxy could not be reached' },
-    });
-  }
-  if (connected.statusCode !== 200) {
-    connected.socket.destroy();
-    throw new ActionError({
-      code: 'transport_unreachable',
-      message: `the egress proxy refused the tunnel to ${origin} (${connected.statusCode})`,
-      retryable: connected.statusCode >= 500,
-      detail: { origin, reason: `the egress proxy refused the tunnel (${connected.statusCode})` },
-    });
-  }
-  // undici types the tunnel as a Duplex; at runtime it is the net.Socket the proxy connection rides on.
-  const socket = connected.socket as Socket;
+  const socket = await openTunnel(proxy, origin, await tunnelTargets(hostname), port);
   if (opts.protocol !== 'https:') return socket;
   return new Promise<Socket>((resolve, reject) => {
     overTunnel({ ...opts, servername: opts.servername || hostname, httpSocket: socket }, (...result) => {
@@ -165,7 +188,7 @@ function proxiedConnector(
     }
     tunnel(proxy, opts, hostname, port, overTunnel).then(
       (socket) => callback(null, socket),
-      (err: unknown) => callback(err instanceof Error ? err : new Error(String(err)), null),
+      (err: unknown) => callback(isNativeError(err) ? err : new Error(String(err)), null),
     );
   };
 }

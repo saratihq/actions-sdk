@@ -1,4 +1,5 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
+import { createServer as createTlsServer } from 'node:https';
 import { type AddressInfo, connect, type Socket } from 'node:net';
 
 /** One request a {@link LoopbackServer} received. */
@@ -79,26 +80,29 @@ export interface ConnectProxy {
   close(): Promise<void>;
 }
 
-/** Where a {@link ConnectProxy} sends a tunnel: a port to splice to (on 127.0.0.1 unless `host` says), or a status to refuse it with. */
-export type TunnelRoute = { host?: string; port: number } | { status: number };
+/** Where a {@link ConnectProxy} sends a tunnel: a port to splice to (on 127.0.0.1 unless `host` says), a status to refuse it with, or no answer at all. */
+export type TunnelRoute = { host?: string; port: number } | { status: number } | { hang: true };
 
 /** Start a {@link ConnectProxy}; `route` decides each tunnel from the authority it was asked for (a port splices every tunnel there). */
 export async function startConnectProxy(
   route: number | ((authority: string, index: number) => TunnelRoute),
+  options: { tls?: { key: string; cert: string } } = {},
 ): Promise<ConnectProxy> {
   const tunnels: string[] = [];
   const sockets = new Set<Socket>();
   const decide = typeof route === 'number' ? (): TunnelRoute => ({ port: route }) : route;
-  const server = createServer((_req, res) => {
+  const refuse = (_req: IncomingMessage, res: ServerResponse): void => {
     res.writeHead(405);
     res.end();
-  });
+  };
+  const server = options.tls ? createTlsServer(options.tls, refuse) : createServer(refuse);
   server.on('connect', (req: IncomingMessage, client: Socket, head: Buffer) => {
     const authority = req.url ?? '';
     const decision = decide(authority, tunnels.length);
     tunnels.push(authority);
     sockets.add(client);
     client.on('error', () => client.destroy());
+    if ('hang' in decision) return;
     if ('status' in decision) {
       client.end(`HTTP/1.1 ${decision.status} Refused\r\n\r\n`);
       return;
