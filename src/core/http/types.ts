@@ -89,6 +89,8 @@ export type FetchLike = (
     /** String for JSON/text; raw bytes for a multipart body. */
     body?: string | Buffer | Uint8Array;
     signal?: AbortSignal;
+    /** `'manual'` hands back a redirect response unfollowed; the default follows it. */
+    redirect?: 'follow' | 'manual';
   },
 ) => Promise<FetchLikeResponse>;
 
