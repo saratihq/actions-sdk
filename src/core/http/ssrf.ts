@@ -189,13 +189,22 @@ export async function publicAddresses(host: string): Promise<string[]> {
   return [...addresses].sort((a, b) => Number(b.family === 4) - Number(a.family === 4)).map((a) => a.address);
 }
 
+/** `text` with any URL userinfo cut out, up to the last '@' before the path, so no password is echoed. */
+export function withoutUserinfo(text: string): string {
+  return text.replace(/\/\/[^/?#]*@/, '//');
+}
+
 /** Ahead-of-time check that `rawUrl` is http(s) and EVERY address its host resolves to is public; an unresolvable host fails closed. */
 export async function assertPublicUrl(rawUrl: string, opts: { allowedHosts?: string[] } = {}): Promise<void> {
   let url: URL;
   try {
     url = new URL(rawUrl);
   } catch {
-    throw new ActionError({ code: 'invalid_input', message: `invalid URL: "${rawUrl}"`, retryable: false });
+    throw new ActionError({
+      code: 'invalid_input',
+      message: `invalid URL: "${withoutUserinfo(rawUrl)}"`,
+      retryable: false,
+    });
   }
   const host = preflightTarget(url, opts.allowedHosts ?? []);
   if (host !== null) await publicAddresses(host);

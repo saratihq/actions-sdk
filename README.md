@@ -77,19 +77,24 @@ connection then dials, with or without a proxy, and every redirect hop is judged
 - **Errors:** a refused target is an `ActionError` with code `ssrf_blocked`. `unresolvable_host`
   means a name had to be judged and could not be resolved. A network failure is
   `transport_unreachable` when the request never left this machine, `transport_interrupted` when the
-  connection broke once it may have gone out (a non-idempotent request is not resent then), and
-  `invalid_input` when the request could not be built.
+  connection broke once it may have gone out, and `transport_timeout` when no answer came in time;
+  a non-idempotent request is not resent after either of the last two. `invalid_input` means the
+  request could not be built (a bad header, a port fetch blocks), `http_error` that the far end did
+  not answer with HTTP, and `provider_error` that a response body could not be decoded.
 - **Letting a host in:** list it in `ORCHESTR_HTTP_ALLOWED_HOSTS`, comma-separated hostnames or IP
   addresses. An entry is matched after URL normalisation (`127.1` is `127.0.0.1`) and allows every
   port and scheme on that host, so an entry that names a port or scheme is ignored rather than
   widened, as is one that is not a host (a range, a wildcard, a path). Each ignored entry is
   reported once with `process.emitWarning`.
-- **Proxies:** with Node's `NODE_USE_ENV_PROXY=1` (or `--use-env-proxy`) and `HTTP(S)_PROXY` set,
-  requests go through the proxy and `NO_PROXY` is honoured. The target is resolved and judged on
-  this machine, and the tunnel is opened to that address (`CONNECT 93.184.215.14:443`), with TLS
-  still verified against the hostname. A proxy that allows destinations by domain name only must
-  therefore also allow those addresses. A name this machine cannot resolve is refused; allowlisting
-  it sends it to the proxy by name, unjudged, leaving the proxy as the only control for it.
+- **Proxies:** with Node's `NODE_USE_ENV_PROXY=1` (or `--use-env-proxy`) and `HTTP(S)_PROXY` set to
+  an `http://` or `https://` proxy, requests go through it and `NO_PROXY` is honoured; a SOCKS proxy
+  is refused as unsupported. The target is resolved and judged on this machine, and the tunnel is
+  opened to that address (`CONNECT 93.184.215.14:443`), trying the next judged address if the proxy
+  cannot reach one, with TLS still verified against the hostname. A proxy that filters destinations
+  by domain name will refuse those tunnels: list the domains it should see in
+  `ORCHESTR_HTTP_ALLOWED_HOSTS`, which sends them to the proxy by name, unjudged, leaving the proxy
+  as the only control for them. The same applies to a name this machine cannot resolve, which is
+  otherwise refused.
 - **Ahead of time:** `guardUserUrl(url)` checks a URL without sending anything, for validating
   input on save.
 - **Tests:** passing `fetchImpl` to `createDirectAuth` replaces `guardedFetch` and so switches

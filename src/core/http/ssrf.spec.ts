@@ -121,6 +121,16 @@ describe('SSRF guard — assertPublicUrl', () => {
     await expect(assertPublicUrl('file:///etc/passwd')).rejects.toMatchObject({ code: 'ssrf_blocked' });
   });
 
+  it.each([['https://admin:hunter2@exa mple.com/x'], ['https://admin:p@ssw0rd@exa mple.com/x']])(
+    'never echoes a password from %s on the save-time check',
+    async (url) => {
+      await expect(guardUserUrl(url)).rejects.toMatchObject({
+        code: 'invalid_input',
+        message: 'invalid URL: "https://exa mple.com/x"',
+      });
+    },
+  );
+
   it('rejects an unparseable URL', async () => {
     await expect(assertPublicUrl('not a url')).rejects.toMatchObject({ code: 'invalid_input' });
   });

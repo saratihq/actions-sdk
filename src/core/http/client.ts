@@ -163,8 +163,11 @@ export class HttpClient {
         });
       }
 
-      // A connection lost once the request may have gone out is resent only when resending is safe.
-      const neverSent = failure.status === 0 && thrown?.code !== 'transport_interrupted';
+      // A request that may have arrived (a lost connection, or a timeout while waiting) is resent only when resending is safe.
+      const neverSent =
+        failure.status === 0 &&
+        thrown?.code !== 'transport_interrupted' &&
+        thrown?.code !== 'transport_timeout';
       const canRetry = failure.retryable && (idempotent || neverSent) && attempt < this.retry.retries;
       if (!canRetry) {
         // Only synthesise an error for the HTTP-status path; a transport throw keeps its own code.

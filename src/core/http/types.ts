@@ -96,6 +96,8 @@ export type FetchLike = (
 
 export interface FetchLikeResponse {
   status: number;
+  /** The URL the response came from, after any redirects; absent from a fetch that does not report it. */
+  url?: string;
   headers: { forEach(cb: (value: string, key: string) => void): void };
   text(): Promise<string>;
   /** Raw response bytes — used when the request asked for `responseType: 'binary'`. */

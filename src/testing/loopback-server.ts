@@ -1,4 +1,4 @@
-import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
+import { createServer, type IncomingHttpHeaders, type IncomingMessage, type ServerResponse } from 'node:http';
 import { createServer as createTlsServer } from 'node:https';
 import { type AddressInfo, connect, type Socket } from 'node:net';
 
@@ -73,22 +73,25 @@ export function withAllowedHosts<T>(hosts: string, fn: () => Promise<T>): Promis
   return withEnv({ ORCHESTR_HTTP_ALLOWED_HOSTS: hosts }, fn);
 }
 
-/** A CONNECT proxy on 127.0.0.1 that records every tunnel asked of it. */
+/** A CONNECT proxy on 127.0.0.1 that records every tunnel asked of it, and the headers each request carried. */
 export interface ConnectProxy {
   port: number;
   tunnels: string[];
+  headers: IncomingHttpHeaders[];
   close(): Promise<void>;
 }
 
-/** Where a {@link ConnectProxy} sends a tunnel: a port to splice to (on 127.0.0.1 unless `host` says), a status to refuse it with, or no answer at all. */
-export type TunnelRoute = { host?: string; port: number } | { status: number } | { hang: true };
+/** Where a {@link ConnectProxy} sends a tunnel: a port to splice to (on 127.0.0.1 unless `host` says, with `preface` sent after the 200), a status to refuse it with, a raw reply, or no answer at all. */
+export type TunnelRoute =
+  { host?: string; port: number; preface?: string } | { status: number } | { reply: string } | { hang: true };
 
 /** Start a {@link ConnectProxy}; `route` decides each tunnel from the authority it was asked for (a port splices every tunnel there). */
 export async function startConnectProxy(
-  route: number | ((authority: string, index: number) => TunnelRoute),
+  route: number | ((authority: string, index: number, headers: IncomingHttpHeaders) => TunnelRoute),
   options: { tls?: { key: string; cert: string } } = {},
 ): Promise<ConnectProxy> {
   const tunnels: string[] = [];
+  const headers: IncomingHttpHeaders[] = [];
   const sockets = new Set<Socket>();
   const decide = typeof route === 'number' ? (): TunnelRoute => ({ port: route }) : route;
   const refuse = (_req: IncomingMessage, res: ServerResponse): void => {
@@ -98,8 +101,9 @@ export async function startConnectProxy(
   const server = options.tls ? createTlsServer(options.tls, refuse) : createServer(refuse);
   server.on('connect', (req: IncomingMessage, client: Socket, head: Buffer) => {
     const authority = req.url ?? '';
-    const decision = decide(authority, tunnels.length);
+    const decision = decide(authority, tunnels.length, req.headers);
     tunnels.push(authority);
+    headers.push(req.headers);
     sockets.add(client);
     client.on('error', () => client.destroy());
     if ('hang' in decision) return;
@@ -107,8 +111,12 @@ export async function startConnectProxy(
       client.end(`HTTP/1.1 ${decision.status} Refused\r\n\r\n`);
       return;
     }
+    if ('reply' in decision) {
+      client.end(decision.reply);
+      return;
+    }
     const upstream = connect(decision.port, decision.host ?? '127.0.0.1', () => {
-      client.write('HTTP/1.1 200 Connection Established\r\n\r\n');
+      client.write(`HTTP/1.1 200 Connection Established\r\n\r\n${decision.preface ?? ''}`);
       upstream.write(head);
       upstream.pipe(client);
       client.pipe(upstream);
@@ -121,6 +129,7 @@ export async function startConnectProxy(
   return {
     port,
     tunnels,
+    headers,
     close: () =>
       new Promise<void>((resolve) => {
         for (const socket of sockets) socket.destroy();

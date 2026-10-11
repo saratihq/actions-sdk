@@ -3,7 +3,7 @@ import { isNativeError } from 'node:util/types';
 
 import { Agent, buildConnector, type Dispatcher, Pool } from 'undici';
 
-import { ActionError } from '../errors';
+import { ActionError, isTlsFailure, neverReached } from '../errors';
 import {
   allowedHosts,
   isBlockedIp,
@@ -20,6 +20,7 @@ const PROXY_TIMEOUT_MS = 10_000;
 interface Proxy {
   pool: Pool;
   headers: Record<string, string>;
+  servername?: string;
 }
 
 interface NoProxy {
@@ -47,24 +48,34 @@ function envValue(lower: string, upper: string): string | undefined {
 
 function proxyFor(name: string, raw: string | undefined): Proxy | null {
   if (!raw) return null;
+  const refuse = (why: string): ActionError =>
+    new ActionError({ code: 'invalid_input', message: `${name} ${why}`, retryable: false });
   let url: URL;
   try {
     url = new URL(raw);
   } catch {
-    throw new ActionError({
-      code: 'invalid_input',
-      message: `${name} is not a valid proxy URL`,
-      retryable: false,
-    });
+    throw refuse('is not a valid proxy URL');
+  }
+  if (/^socks/i.test(url.protocol))
+    throw refuse('names a SOCKS proxy, which is not supported; use an HTTP or HTTPS proxy');
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+    throw refuse('is not a valid proxy URL: it must start with http:// or https://');
   }
   const headers: Record<string, string> = {};
   if (url.username || url.password) {
-    const credentials = `${decodeURIComponent(url.username)}:${decodeURIComponent(url.password)}`;
+    let credentials: string;
+    try {
+      credentials = `${decodeURIComponent(url.username)}:${decodeURIComponent(url.password)}`;
+    } catch {
+      throw refuse('has credentials that are not valid percent-encoding');
+    }
     headers['proxy-authorization'] = `Basic ${Buffer.from(credentials).toString('base64')}`;
   }
+  const host = url.hostname.replace(/^\[|\]$/g, '');
   return {
     pool: new Pool(url.origin, { connectTimeout: PROXY_TIMEOUT_MS, headersTimeout: PROXY_TIMEOUT_MS }),
     headers,
+    ...(isIP(host) ? {} : { servername: host }),
   };
 }
 
@@ -112,15 +123,21 @@ async function tunnelTargets(hostname: string): Promise<string[]> {
   }
 }
 
-function proxyUnreachable(origin: string, cause: unknown): ActionError {
-  const timedOut = (cause as { code?: unknown } | null)?.code === 'UND_ERR_HEADERS_TIMEOUT';
-  const reason = timedOut
-    ? 'the egress proxy did not answer the tunnel request'
-    : 'the egress proxy could not be reached';
+// What went wrong on the way through the proxy, never naming where the proxy lives.
+function proxyFailure(origin: string, cause: unknown): ActionError {
+  const { code = '', name = '' } = (cause ?? {}) as { code?: string; name?: string };
+  const [reason, retryable] =
+    code === 'UND_ERR_HEADERS_TIMEOUT'
+      ? ['the egress proxy did not answer the tunnel request', true]
+      : isTlsFailure(cause)
+        ? [`the egress proxy's certificate was rejected (${code})`, false]
+        : code === 'UND_ERR_HEADERS_OVERFLOW' || name === 'HTTPParserError' || code.startsWith('HPE_')
+          ? ['the egress proxy sent an invalid reply', false]
+          : ['the egress proxy could not be reached', true];
   return new ActionError({
     code: 'transport_unreachable',
     message: `${reason} on the way to ${origin}`,
-    retryable: true,
+    retryable,
     cause,
     detail: { origin, reason },
   });
@@ -136,9 +153,10 @@ async function openTunnel(proxy: Proxy, origin: string, targets: string[], port:
       connected = await proxy.pool.connect({
         path: authority,
         headers: { ...proxy.headers, host: authority },
+        ...(proxy.servername ? { servername: proxy.servername } : {}),
       });
     } catch (cause) {
-      throw proxyUnreachable(origin, cause);
+      throw proxyFailure(origin, cause);
     }
     // undici types the tunnel as a Duplex; at runtime it is the net.Socket the proxy connection rides on.
     if (connected.statusCode === 200) return connected.socket as Socket;
@@ -163,11 +181,21 @@ async function tunnel(
 ): Promise<Socket> {
   const origin = `${opts.protocol}//${opts.host ?? opts.hostname}`;
   const socket = await openTunnel(proxy, origin, await tunnelTargets(hostname), port);
-  if (opts.protocol !== 'https:') return socket;
+  if (opts.protocol !== 'https:') {
+    // Bytes ahead of our request mean the far end is not an HTTP server; handing them on makes undici reconnect, CONNECT after CONNECT.
+    if (socket.readableLength === 0) return socket;
+    socket.destroy();
+    throw new ActionError({
+      code: 'http_error',
+      message: `the tunnel to ${origin} carried data before the request was sent, so it is not answering as an HTTP server`,
+      retryable: false,
+      detail: { origin, reason: 'data arrived before the request was sent' },
+    });
+  }
   return new Promise<Socket>((resolve, reject) => {
-    overTunnel({ ...opts, servername: opts.servername || hostname, httpSocket: socket }, (...result) => {
+    overTunnel({ ...opts, httpSocket: socket }, (...result) => {
       if (result[0] === null) resolve(result[1]);
-      else reject(result[0]);
+      else reject(neverReached(origin, result[0]));
     });
   });
 }
@@ -208,7 +236,7 @@ function createEgress(key: string, proxied: boolean): Egress {
   return {
     key,
     dispatcher,
-    close: () => Promise.all([dispatcher.close(), ...pools.map((pool) => pool.close())]),
+    close: () => dispatcher.close().then(() => Promise.all(pools.map((pool) => pool.close()))),
   };
 }
 
@@ -221,7 +249,9 @@ export function egressDispatcher(): Dispatcher {
     ...PROXY_VARS.map((name) => process.env[name] ?? ''),
   ].join('\n');
   if (egress?.key === key) return egress.dispatcher;
-  void egress?.close().catch(() => undefined);
-  egress = createEgress(key, proxied);
-  return egress.dispatcher;
+  const next = createEgress(key, proxied);
+  const previous = egress;
+  egress = next;
+  void previous?.close().catch(() => undefined);
+  return next.dispatcher;
 }

@@ -51,12 +51,12 @@ export class DirectTransport implements Transport {
     });
     // Binary hands back raw bytes verbatim — text-decoding them would corrupt the file.
     if (prepared.responseType === 'binary') {
-      const bytes = await readBody(prepared.url, () =>
+      const bytes = await readBody(res.url || prepared.url, () =>
         res.arrayBuffer().then((buffer) => Buffer.from(buffer)),
       );
       return { status: res.status, headers, data: bytes };
     }
-    const text = await readBody(prepared.url, () => res.text());
+    const text = await readBody(res.url || prepared.url, () => res.text());
     return { status: res.status, headers, data: parseBody(text, headers['content-type']) };
   }
 

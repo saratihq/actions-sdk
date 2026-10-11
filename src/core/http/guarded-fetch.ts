@@ -4,7 +4,7 @@ import { fetch, type Response } from 'undici';
 
 import { ActionError, transportFailure } from '../errors';
 import { egressDispatcher } from './egress';
-import { allowedHosts, preflightTarget, ssrfRefusal, targetHost } from './ssrf';
+import { allowedHosts, preflightTarget, ssrfRefusal, targetHost, withoutUserinfo } from './ssrf';
 import type { FetchLike } from './types';
 
 type FetchInit = NonNullable<Parameters<FetchLike>[1]>;
@@ -19,6 +19,18 @@ const BODY_HEADERS = new Set([
   'content-length',
 ]);
 const CROSS_ORIGIN_DROPPED_HEADERS = new Set(['authorization', 'proxy-authorization', 'cookie', 'host']);
+// The Fetch standard's blocked ports, as undici lists them: fetch refuses these before connecting and says only "bad port".
+const BAD_PORTS = new Set([
+  1, 7, 9, 11, 13, 15, 17, 19, 20, 21, 22, 23, 25, 37, 42, 43, 53, 69, 77, 79, 87, 95, 101, 102, 103, 104,
+  109, 110, 111, 113, 115, 117, 119, 123, 135, 137, 139, 143, 161, 179, 389, 427, 465, 512, 513, 514, 515,
+  526, 530, 531, 532, 540, 548, 554, 556, 563, 587, 601, 636, 989, 990, 993, 995, 1719, 1720, 1723, 2049,
+  3659, 4045, 4190, 5060, 5061, 6000, 6566, 6665, 6666, 6667, 6668, 6669, 6679, 6697, 10080,
+]);
+const HEADER_NAME = /^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/;
+// fetch refuses a value with a line break, a NUL or a character beyond Latin-1, and its error repeats the value.
+function unsendableValue(value: string): boolean {
+  return /[\r\n]/.test(value) || value.includes('\0') || [...value].some((ch) => ch.charCodeAt(0) > 0xff);
+}
 
 function withoutHeaders(
   headers: Record<string, string> | undefined,
@@ -27,7 +39,35 @@ function withoutHeaders(
   return Object.fromEntries(Object.entries(headers ?? {}).filter(([name]) => !names.has(name.toLowerCase())));
 }
 
+function unsendable(origin: string, reason: string): ActionError {
+  return new ActionError({
+    code: 'invalid_input',
+    message: `the request to ${origin} could not be sent: ${reason}`,
+    retryable: false,
+    detail: { origin, reason },
+  });
+}
+
+function assertSendable(url: URL, headers: Record<string, string> | undefined): void {
+  if (url.port && BAD_PORTS.has(Number(url.port))) {
+    throw unsendable(
+      url.origin,
+      `fetch will not connect to port ${url.port}, a port the Fetch standard blocks`,
+    );
+  }
+  for (const [name, value] of Object.entries(headers ?? {})) {
+    if (!HEADER_NAME.test(name)) throw unsendable(url.origin, 'a header name is not a valid HTTP token');
+    if (unsendableValue(value)) {
+      throw unsendable(
+        url.origin,
+        `header "${name}" has a line break, a NUL or a character outside Latin-1 in its value`,
+      );
+    }
+  }
+}
+
 async function send(url: URL, { method, headers, body, signal }: FetchInit): Promise<Response> {
+  assertSendable(url, headers);
   preflightTarget(url, allowedHosts());
   try {
     return await fetch(url, {
@@ -39,9 +79,13 @@ async function send(url: URL, { method, headers, body, signal }: FetchInit): Pro
       dispatcher: egressDispatcher(),
     });
   } catch (err) {
+    if (err instanceof ActionError) throw err;
     const cause = (err as { cause?: unknown }).cause;
     if (cause instanceof ActionError) throw cause;
     if (isNativeError(cause)) throw transportFailure(url.origin, cause, 'request');
+    // A TypeError with no cause is fetch refusing its own arguments; its message can repeat what it refused.
+    if (isNativeError(err) && err.name === 'TypeError')
+      throw unsendable(url.origin, 'fetch refused the request');
     throw err;
   }
 }
@@ -53,7 +97,7 @@ function requestUrl(input: string | URL): URL {
   } catch {
     throw new ActionError({
       code: 'invalid_input',
-      message: `invalid URL: "${String(input).replace(/\/\/[^/@\s]*@/, '//')}"`,
+      message: `invalid URL: "${withoutUserinfo(String(input))}"`,
       retryable: false,
     });
   }

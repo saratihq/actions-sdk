@@ -6,11 +6,12 @@ import {
   withAllowedHosts,
   withEnv,
 } from '../../testing/loopback-server';
+import { runInPlainNode } from '../../testing/plain-node';
 import dns from 'node:dns';
 import { readFileSync } from 'node:fs';
 import type { Server } from 'node:https';
 import { createServer as createHttpsServer } from 'node:https';
-import { type AddressInfo, isIP } from 'node:net';
+import { type AddressInfo, createServer as createNetServer, isIP, type Socket } from 'node:net';
 import { join } from 'node:path';
 import tls from 'node:tls';
 
@@ -224,6 +225,15 @@ describe('guardedFetch — request shape and failures', () => {
         res.end();
         return;
       }
+      if (hit.url === '/slow') {
+        setTimeout(() => res.end('late'), 400);
+        return;
+      }
+      if (hit.url === '/gzip-lie') {
+        res.writeHead(200, { 'content-encoding': 'gzip', 'content-type': 'text/plain' });
+        res.end('this is not gzip');
+        return;
+      }
       if (hit.url === '/drop-after-request') {
         res.socket?.destroy();
         return;
@@ -276,8 +286,125 @@ describe('guardedFetch — request shape and failures', () => {
     await withAllowedHosts('127.0.0.1', async () => {
       await expect(guardedFetch('http://127.0.0.1:9/feed.xml')).rejects.toMatchObject({
         code: 'invalid_input',
-        message: 'the request to http://127.0.0.1:9 could not be sent: bad port',
+        message:
+          'the request to http://127.0.0.1:9 could not be sent: fetch will not connect to port 9, a port the Fetch standard blocks',
       });
+    });
+  });
+
+  it.each([
+    [
+      'a value with a line break',
+      { 'x-api-key': 'sk_live_secret\r\nX-Injected: 1' },
+      'header "x-api-key" has a line break',
+    ],
+    ['a value outside Latin-1', { 'x-title': 'Café — smart' }, 'header "x-title" has a line break'],
+    [
+      'a name that is not a token',
+      { 'my header: sk_live_secret': 'x' },
+      'a header name is not a valid HTTP token',
+    ],
+  ])('refuses %s before sending, naming the header but never its value', async (_label, headers, said) => {
+    const failure = await withAllowedHosts('127.0.0.1', () =>
+      guardedFetch(`http://${base}/x`, { method: 'POST', headers, body: '{}' }).catch((err: unknown) => err),
+    );
+    expect(failure).toMatchObject({ code: 'invalid_input', retryable: false });
+    expect((failure as Error).message).toContain(said);
+    expect((failure as Error).message).not.toMatch(/sk_live_secret|Café/);
+    expect(server.hits).toHaveLength(0);
+  });
+
+  it('does not resend a POST that timed out, since it may already have arrived', async () => {
+    const http = new HttpClient({ retry: { baseDelayMs: 1, maxDelayMs: 1 } });
+    await withAllowedHosts('127.0.0.1', async () => {
+      await expect(
+        http.post(`http://${base}/slow`, {
+          auth: createDirectAuth({ type: 'none' }, { type: 'none' }),
+          body: { amount: 5 },
+          timeoutMs: 100,
+        }),
+      ).rejects.toMatchObject({ code: 'transport_timeout' });
+    });
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    expect(server.hits.map((h) => h.url)).toEqual(['/slow']);
+  });
+
+  it('says a server that speaks first was not answering with HTTP, and does not retry it', async () => {
+    const sockets: Socket[] = [];
+    const banner = createNetServer((socket) => {
+      sockets.push(socket);
+      socket.write('SSH-2.0-OpenSSH_9.6\r\n');
+    });
+    await new Promise<void>((resolve) => banner.listen(0, '127.0.0.1', resolve));
+    const { port } = banner.address() as AddressInfo;
+    try {
+      await withAllowedHosts('127.0.0.1', async () => {
+        await expect(guardedFetch(`http://127.0.0.1:${port}/`)).rejects.toMatchObject({
+          code: 'http_error',
+          retryable: false,
+          message: expect.stringContaining(`http://127.0.0.1:${port} did not answer with HTTP`),
+        });
+      });
+    } finally {
+      for (const socket of sockets) socket.destroy();
+      await new Promise((resolve) => banner.close(resolve));
+    }
+  });
+
+  it('calls a body that will not decode a provider error and fetches it once', async () => {
+    const http = new HttpClient({ retry: { baseDelayMs: 1, maxDelayMs: 1 } });
+    await withAllowedHosts('127.0.0.1', async () => {
+      await expect(
+        http.get(`http://${base}/gzip-lie`, { auth: createDirectAuth({ type: 'none' }, { type: 'none' }) }),
+      ).rejects.toMatchObject({
+        code: 'provider_error',
+        retryable: false,
+        message: expect.stringContaining(`http://${base} sent a response body that could not be decoded`),
+      });
+    });
+    expect(server.hits.map((h) => h.url)).toEqual(['/gzip-lie']);
+  });
+
+  it('names the hop whose body broke, not the origin that redirected to it', async () => {
+    const second = await startLoopbackServer((_req, res) => {
+      res.writeHead(200, { 'content-length': '100' });
+      res.write('partial', () => setTimeout(() => res.socket?.destroy(), 50));
+    });
+    const relay = await startLoopbackServer((_req, res) => {
+      res.writeHead(302, { location: `http://localhost:${second.port}/drop` });
+      res.end();
+    });
+    const transport = new DirectTransport({ scheme: { type: 'none' }, credential: { type: 'none' } });
+    try {
+      await withAllowedHosts('127.0.0.1,localhost', async () => {
+        await expect(
+          transport.send({ method: 'GET', url: `http://127.0.0.1:${relay.port}/`, headers: {} }),
+        ).rejects.toMatchObject({
+          code: 'transport_interrupted',
+          message: `the connection to http://localhost:${second.port} broke while reading the response: other side closed`,
+        });
+      });
+    } finally {
+      await relay.close();
+      await second.close();
+    }
+  });
+
+  it('keeps the reason for a dual-stack refusal on the real error path, outside Jest', async () => {
+    const closed = await startLoopbackServer();
+    const { port } = closed;
+    await closed.close();
+    const out = await runInPlainNode(
+      `require(${JSON.stringify(join(__dirname, 'guarded-fetch.ts'))})
+        .guardedFetch('http://localhost:${port}/x')
+        .catch((err) => console.log(JSON.stringify({ code: err.code, message: err.message })));`,
+      { ORCHESTR_HTTP_ALLOWED_HOSTS: 'localhost' },
+    );
+    expect(JSON.parse(out)).toEqual({
+      code: 'transport_unreachable',
+      message: expect.stringMatching(
+        new RegExp(`^could not reach http://localhost:${port}: connect ECONNREFUSED`),
+      ),
     });
   });
 
@@ -311,13 +438,16 @@ describe('guardedFetch — request shape and failures', () => {
     });
   });
 
-  it('never echoes a password from a URL that also fails to parse', async () => {
-    const failure = await guardedFetch('https://admin:hunter2@exa mple.com/x').catch((err: unknown) => err);
-    expect(failure).toMatchObject({
-      code: 'invalid_input',
-      message: 'invalid URL: "https://exa mple.com/x"',
-    });
-  });
+  it.each([['https://admin:hunter2@exa mple.com/x'], ['https://admin:p@ssw0rd@exa mple.com/x']])(
+    'never echoes a password from %s, which also fails to parse',
+    async (url) => {
+      const failure = await guardedFetch(url).catch((err: unknown) => err);
+      expect(failure).toMatchObject({
+        code: 'invalid_input',
+        message: 'invalid URL: "https://exa mple.com/x"',
+      });
+    },
+  );
 
   it('hands back a redirect unfollowed when asked to, so a POST body is never re-sent', async () => {
     const res = await withAllowedHosts('127.0.0.1', () =>
@@ -543,6 +673,92 @@ describe('guardedFetch — behind an env proxy', () => {
     }
   });
 
+  it('sends the proxy URL credentials as Proxy-Authorization, and never to the target', async () => {
+    const expected = `Basic ${Buffer.from('u:p@ss w').toString('base64')}`;
+    const guarded = await startConnectProxy((_authority, _index, headers) =>
+      headers['proxy-authorization'] === expected ? { port: server.port } : { status: 407 },
+    );
+    try {
+      const res = await withEnv(
+        proxyEnv({ HTTP_PROXY: `http://u:p%40ss%20w@localhost:${guarded.port}` }),
+        () => guardedFetch('http://93.184.215.14/authed'),
+      );
+      expect(await res.text()).toBe('reached');
+      expect(server.hits[0]?.headers['proxy-authorization']).toBeUndefined();
+      await withEnv(proxyEnv({ HTTP_PROXY: `http://localhost:${guarded.port}` }), async () => {
+        await expect(guardedFetch('http://93.184.215.14/anonymous')).rejects.toMatchObject({
+          message: 'the egress proxy refused the tunnel to http://93.184.215.14 (407)',
+          retryable: false,
+        });
+      });
+      expect(guarded.headers.map((h) => h['proxy-authorization'])).toEqual([expected, undefined]);
+    } finally {
+      await guarded.close();
+    }
+  });
+
+  it('calls an oversized tunnel reply invalid instead of blaming reachability', async () => {
+    const babbling = await startConnectProxy(() => ({
+      reply: `HTTP/1.1 200 OK\r\nX-Pad: ${'a'.repeat(70_000)}\r\n\r\n`,
+    }));
+    try {
+      await withEnv(proxyEnv({ HTTP_PROXY: `http://localhost:${babbling.port}` }), async () => {
+        await expect(guardedFetch('http://93.184.215.14/x')).rejects.toMatchObject({
+          retryable: false,
+          message: 'the egress proxy sent an invalid reply on the way to http://93.184.215.14',
+        });
+      });
+    } finally {
+      await babbling.close();
+    }
+  });
+
+  it('fails once, without a reconnect loop, when data arrives with the tunnel before the request', async () => {
+    const chatty = await startConnectProxy(() => ({
+      port: server.port,
+      preface: 'HTTP/1.1 200 OK\r\n\r\nINJECTED',
+    }));
+    try {
+      await withEnv(proxyEnv({ HTTP_PROXY: `http://localhost:${chatty.port}` }), async () => {
+        await expect(guardedFetch('http://93.184.215.14/x')).rejects.toMatchObject({
+          code: 'http_error',
+          retryable: false,
+          message:
+            'the tunnel to http://93.184.215.14 carried data before the request was sent, so it is not answering as an HTTP server',
+        });
+      });
+      expect(chatty.tunnels).toHaveLength(1);
+    } finally {
+      await chatty.close();
+    }
+  });
+
+  it.each([
+    ['localhost:3128', 'HTTP_PROXY is not a valid proxy URL: it must start with http:// or https://'],
+    [
+      'socks5://127.0.0.1:1080',
+      'HTTP_PROXY names a SOCKS proxy, which is not supported; use an HTTP or HTTPS proxy',
+    ],
+    ['http://u:p%zz@localhost:3128', 'HTTP_PROXY has credentials that are not valid percent-encoding'],
+  ])('refuses HTTP_PROXY=%s by naming the variable', async (raw, message) => {
+    await withEnv(proxyEnv({ HTTP_PROXY: raw }), async () => {
+      await expect(guardedFetch('http://93.184.215.14/x')).rejects.toMatchObject({
+        code: 'invalid_input',
+        retryable: false,
+        message,
+      });
+    });
+  });
+
+  it('keeps working once a briefly invalid proxy setting is put back', async () => {
+    await withEnv(proxyEnv(), () => guardedFetch('http://93.184.215.14/one').then((res) => res.text()));
+    await withEnv(proxyEnv({ HTTP_PROXY: 'http://[bad' }), async () => {
+      await expect(guardedFetch('http://93.184.215.14/x')).rejects.toMatchObject({ code: 'invalid_input' });
+    });
+    const res = await withEnv(proxyEnv(), () => guardedFetch('http://93.184.215.14/two'));
+    expect(await res.text()).toBe('reached');
+  });
+
   it('says the proxy is down without printing where it lives', async () => {
     const gone = await startLoopbackServer();
     const deadPort = gone.port;
@@ -644,6 +860,7 @@ describe('guardedFetch — TLS to the proxy and over the tunnel', () => {
   let securePort: number;
   let plain: LoopbackServer;
   let restoreDns: () => void;
+  const serverNames: Array<string | false> = [];
 
   const env = (proxy: Record<string, string>): Record<string, string | undefined> => ({
     NODE_USE_ENV_PROXY: '1',
@@ -660,10 +877,17 @@ describe('guardedFetch — TLS to the proxy and over the tunnel', () => {
   beforeAll(async () => {
     tls.setDefaultCACertificates([...defaultCAs, tlsFixture.cert]);
     secure = createHttpsServer(tlsFixture, (req, res) => res.end(`secure ${req.url}`));
+    secure.on('secureConnection', (socket) =>
+      serverNames.push((socket as { servername?: string | false }).servername ?? false),
+    );
     await new Promise<void>((resolve) => secure.listen(0, '127.0.0.1', resolve));
     securePort = (secure.address() as AddressInfo).port;
     plain = await startLoopbackServer();
-    restoreDns = stubDns({ 'secure.test': '93.184.215.14', 'other.test': '93.184.215.14' });
+    restoreDns = stubDns({
+      'secure.test': '93.184.215.14',
+      'other.test': '93.184.215.14',
+      'proxy.test': '127.0.0.1',
+    });
   });
 
   afterAll(async () => {
@@ -706,9 +930,74 @@ describe('guardedFetch — TLS to the proxy and over the tunnel', () => {
       await withEnv(env({ HTTPS_PROXY: `http://localhost:${proxy.port}` }), async () => {
         await expect(guardedFetch('https://other.test/x')).rejects.toMatchObject({
           code: 'transport_unreachable',
+          retryable: false,
           message: expect.stringContaining(
             "could not reach https://other.test: Hostname/IP does not match certificate's altnames",
           ),
+        });
+      });
+    } finally {
+      await proxy.close();
+    }
+  });
+
+  it('verifies an https:// proxy against its own name, also when it carries an allowlisted name', async () => {
+    const proxy = await startConnectProxy(plain.port, { tls: tlsFixture });
+    try {
+      const res = await withEnv(
+        env({
+          HTTP_PROXY: `https://localhost:${proxy.port}`,
+          ORCHESTR_HTTP_ALLOWED_HOSTS: 'upstream.invalid',
+        }),
+        () => guardedFetch('http://upstream.invalid/allowlisted'),
+      );
+      expect(await res.text()).toBe('reached');
+      expect(proxy.tunnels).toEqual(['upstream.invalid:80']);
+    } finally {
+      await proxy.close();
+    }
+  });
+
+  it('reaches an https IP literal through the proxy without sending the IP as the TLS server name', async () => {
+    const proxy = await startConnectProxy(securePort);
+    try {
+      const res = await withEnv(
+        env({ HTTPS_PROXY: `http://localhost:${proxy.port}`, ORCHESTR_HTTP_ALLOWED_HOSTS: '127.0.0.1' }),
+        () => guardedFetch(`https://127.0.0.1:${securePort}/ip`),
+      );
+      expect(await res.text()).toBe('secure /ip');
+      expect(serverNames.at(-1)).toBe(false);
+    } finally {
+      await proxy.close();
+    }
+  });
+
+  it("says the proxy's certificate was rejected, without naming the proxy", async () => {
+    const proxy = await startConnectProxy(plain.port, { tls: tlsFixture });
+    try {
+      await withEnv(env({ HTTP_PROXY: `https://proxy.test:${proxy.port}` }), async () => {
+        const failure = await guardedFetch('http://93.184.215.14/x').catch((err: unknown) => err);
+        expect(failure).toMatchObject({
+          retryable: false,
+          message:
+            "the egress proxy's certificate was rejected (ERR_TLS_CERT_ALTNAME_INVALID) on the way to http://93.184.215.14",
+        });
+        expect((failure as Error).message).not.toContain('proxy.test');
+      });
+    } finally {
+      await proxy.close();
+    }
+  });
+
+  it('calls a tunnel that closes during the target TLS handshake never sent', async () => {
+    const proxy = await startConnectProxy(() => ({ reply: 'HTTP/1.1 200 Connection Established\r\n\r\n' }));
+    try {
+      await withEnv(env({ HTTPS_PROXY: `http://localhost:${proxy.port}` }), async () => {
+        await expect(
+          guardedFetch('https://secure.test/x', { method: 'POST', body: '{}' }),
+        ).rejects.toMatchObject({
+          code: 'transport_unreachable',
+          message: expect.stringContaining('could not reach https://secure.test:'),
         });
       });
     } finally {
