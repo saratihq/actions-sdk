@@ -85,3 +85,8 @@ export function transportOf(auth: AuthHandle): Transport {
   }
   return transport;
 }
+
+/** The non-secret label of the rail a handle rides (`direct`, or a host broker's kind), never the transport itself. */
+export function transportKind(auth: AuthHandle): string {
+  return transportOf(auth).kind;
+}

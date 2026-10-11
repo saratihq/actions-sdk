@@ -1,8 +1,8 @@
 import type { AuthHandle, AuthScheme, DirectCredential } from '../core/auth';
-import { createDirectAuth } from '../core/auth-factories';
+import { createAuth, createDirectAuth } from '../core/auth-factories';
 import { guardedFetch } from '../core/http/guarded-fetch';
-import type { FetchLike, FetchLikeResponse } from '../core/http/types';
-import { fakeResponse } from '../testing/fakes';
+import type { FetchLike, FetchLikeResponse, NormalizedResponse } from '../core/http/types';
+import { FakeTransport, fakeResponse } from '../testing/fakes';
 import { type LoopbackServer, startLoopbackServer, withAllowedHosts } from '../testing/loopback-server';
 import { MemoryStore } from '../testing/memory-store';
 import { calendlyAuth } from './calendly/common';
@@ -116,13 +116,6 @@ const CASES: Record<string, Case> = {
     run: (auth, foreign) =>
       runQuery.execute({ auth, props: { instanceUrl: foreign, query: 'SELECT Id FROM Account' } }),
   },
-  'jira.get_issue at an editor-chosen instanceUrl': {
-    scheme: jiraAuth,
-    credential: basic,
-    provider: (url) => (url.hostname === 'api.atlassian.com' ? fakeResponse(401, '') : null),
-    run: (auth, foreign) =>
-      getIssue.execute({ auth, props: { instanceUrl: foreign, issueIdOrKey: 'ENG-1' } }),
-  },
 };
 
 /** The provider's own origin answers from `provider`; any other URL rides the real guarded hop to a real socket. */
@@ -224,9 +217,7 @@ describe('instance URLs on each vendor-documented cloud domain are reached; any 
     ['https://acme.atlassian-us-gov-mod.net', GOV_GATEWAY, 'https://acme.atlassian-us-gov-mod.net'],
     ['https://acme.atlassian-us-gov-mod.net/jira', GOV_GATEWAY, 'https://acme.atlassian-us-gov-mod.net'],
     ['https://acme.atlassian.net/browse/ENG-1', GATEWAY, 'https://acme.atlassian.net'],
-    ['http://acme.atlassian.net', GATEWAY, null],
-    ['https://acme.atlassian.net.evil.com', GATEWAY, null],
-    ['https://jira.acme-corp.example', GATEWAY, null],
+    ['https://ACME.atlassian.net:443/', GATEWAY, 'https://acme.atlassian.net'],
   ] as const)('jira instanceUrl %s probes %s, then reaches %s', async (instanceUrl, gateway, site) => {
     const { urls, fetchImpl } = recorder((url) =>
       url.pathname === '/oauth/token/accessible-resources'
@@ -237,13 +228,8 @@ describe('instance URLs on each vendor-documented cloud domain are reached; any 
       auth: createDirectAuth(jiraAuth, basic, { fetchImpl }),
       props: { instanceUrl, issueIdOrKey: 'ENG-1' },
     });
-    if (site) {
-      await expect(run).resolves.toMatchObject({ key: 'ENG-1' });
-      expect(urls).toEqual([`${gateway}/oauth/token/accessible-resources`, `${site}/rest/api/3/issue/ENG-1`]);
-    } else {
-      await expect(run).rejects.toMatchObject({ code: 'credential_scope' });
-      expect(urls).toEqual([`${gateway}/oauth/token/accessible-resources`]);
-    }
+    await expect(run).resolves.toMatchObject({ key: 'ENG-1' });
+    expect(urls).toEqual([`${gateway}/oauth/token/accessible-resources`, `${site}/rest/api/3/issue/ENG-1`]);
   });
 
   it('a Government Cloud OAuth token resolves its site through the Government Cloud gateway', async () => {
@@ -262,8 +248,44 @@ describe('instance URLs on each vendor-documented cloud domain are reached; any 
     ]);
   });
 
-  it.each(['', '   ', 'acme.atlassian-us-gov-mod.net', 'acme.atlassian.net:443'])(
-    'jira instanceUrl %j is refused before any request, so no credential reaches either gateway',
+  it.each([
+    'acme.atlassian-us-gov-mod.net',
+    'acme.atlassian.net:443',
+    'http://acme.atlassian.net',
+    'https://acme.atlassian.net:8443',
+    'https://user@acme.atlassian.net',
+    'https://acme.atlassian.net.evil.com',
+    'https://jira.acme-corp.example',
+    'https://atlassian.net',
+    'https://agency.atlassian-us-gov-mod.com',
+    'https://agency.atlassian-us-gov.net',
+    'https://agency.atlassian-gov-mod.net',
+    'https://agency.atlassian-us-gov-mod.net.',
+    'https://acme.atlassian.net.',
+  ])('jira instanceUrl %j is refused on either rail before any request', async (instanceUrl) => {
+    const { urls, fetchImpl } = recorder(() => json([{ id: 'cloud-1', url: 'https://acme.atlassian.net' }]));
+    const broker = new FakeTransport(() => ({ status: 200, headers: {}, data: [] }));
+    for (const auth of [
+      createDirectAuth(
+        jiraAuth,
+        { type: 'basic', username: 'gov@agency.gov', password: 'GOVTOKEN' },
+        { fetchImpl },
+      ),
+      createAuth(jiraAuth, broker),
+    ]) {
+      await expect(
+        getIssue.execute({ auth, props: { instanceUrl, issueIdOrKey: 'ENG-1' } }),
+      ).rejects.toMatchObject({
+        code: 'invalid_input',
+        detail: { field: 'instanceUrl' },
+      });
+    }
+    expect(urls).toEqual([]);
+    expect(broker.requests).toEqual([]);
+  });
+
+  it.each([undefined, '', '   '])(
+    'a blank instanceUrl (%j) on an API-token connection is refused before any request',
     async (instanceUrl) => {
       const { urls, fetchImpl } = recorder(() => json({}));
       await expect(
@@ -273,15 +295,68 @@ describe('instance URLs on each vendor-documented cloud domain are reached; any 
             { type: 'basic', username: 'gov@agency.gov', password: 'GOVTOKEN' },
             { fetchImpl },
           ),
-          props: { instanceUrl, issueIdOrKey: 'ENG-1' },
+          props: { ...(instanceUrl !== undefined ? { instanceUrl } : {}), issueIdOrKey: 'ENG-1' },
         }),
-      ).rejects.toMatchObject({
-        code: 'invalid_input',
-        message: expect.stringMatching(/instanceUrl|Instance URL/),
-      });
+      ).rejects.toMatchObject({ code: 'invalid_input', detail: { field: 'instanceUrl' } });
       expect(urls).toEqual([]);
     },
   );
+
+  const brokerWithSites = (sites: Array<{ id: string; url: string }>) =>
+    new FakeTransport((req): NormalizedResponse => {
+      const path = new URL(req.url).pathname;
+      if (path === '/oauth/token/accessible-resources') return { status: 200, headers: {}, data: sites };
+      if (path.endsWith('/search/jql')) {
+        return { status: 200, headers: {}, data: { issues: [{ id: '10', key: 'ENG-10', fields: {} }] } };
+      }
+      return { status: 201, headers: {}, data: { id: '10001', key: 'ENG-1' } };
+    });
+  const issueProps = { project: 'ENG', issueType: 'Task', summary: 's' };
+
+  it.each([
+    ['A1: omitted', {}],
+    ['A2: empty', { instanceUrl: '' }],
+  ])(
+    '%s instanceUrl on a managed connection that reaches one site works as on 0.1.6',
+    async (_label, extra) => {
+      const broker = brokerWithSites([{ id: 'cloud-1', url: 'https://acme.atlassian.net' }]);
+      await expect(
+        createIssue.execute({ auth: createAuth(jiraAuth, broker), props: { ...issueProps, ...extra } }),
+      ).resolves.toEqual({ id: '10001', key: 'ENG-1' });
+      expect(broker.requests.map((r) => `${r.method} ${r.url}`)).toEqual([
+        `GET ${GATEWAY}/oauth/token/accessible-resources`,
+        `POST ${GATEWAY}/ex/jira/cloud-1/rest/api/3/issue`,
+      ]);
+    },
+  );
+
+  it('A3: the new-issue trigger on a managed connection with no instanceUrl polls the one site, as on 0.1.6', async () => {
+    const broker = brokerWithSites([{ id: 'cloud-1', url: 'https://acme.atlassian.net' }]);
+    const store = new MemoryStore();
+    await store.set('lastPolledAt', '2026-10-01T00:00:00.000Z');
+    const { events } = await newIssue.runPoll({ auth: createAuth(jiraAuth, broker), props: {}, store });
+    expect(events.map((e) => e.key)).toEqual(['ENG-10']);
+    expect(broker.requests.map((r) => new URL(r.url).pathname)).toEqual([
+      '/oauth/token/accessible-resources',
+      '/ex/jira/cloud-1/rest/api/3/search/jql',
+    ]);
+  });
+
+  it('B: a blank instanceUrl on a managed connection that reaches two sites is refused, naming both', async () => {
+    const broker = brokerWithSites([
+      { id: 'prod-id', url: 'https://acme.atlassian.net' },
+      { id: 'sandbox-id', url: 'https://acme-sandbox.atlassian.net' },
+    ]);
+    await expect(
+      createIssue.execute({ auth: createAuth(jiraAuth, broker), props: issueProps }),
+    ).rejects.toMatchObject({
+      code: 'invalid_input',
+      message: expect.stringContaining('https://acme.atlassian.net, https://acme-sandbox.atlassian.net'),
+    });
+    expect(broker.requests.map((r) => new URL(r.url).pathname)).toEqual([
+      '/oauth/token/accessible-resources',
+    ]);
+  });
 
   it("an instanceUrl that is none of the OAuth token's sites is refused, never sent to another tenant", async () => {
     const { urls, fetchImpl } = recorder((url) =>
@@ -319,7 +394,7 @@ describe('instance URLs on each vendor-documented cloud domain are reached; any 
       listComments.execute({ auth, props: { instanceUrl, issueIdOrKey: 'ENG-1' } }),
     ).rejects.toMatchObject({
       code: 'provider_error',
-      message: expect.stringContaining('an empty body'),
+      message: 'Jira returned an empty body where JSON was expected',
     });
     const store = new MemoryStore();
     await store.set('lastPolledAt', '2026-10-01T00:00:00.000Z');

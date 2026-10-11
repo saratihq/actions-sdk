@@ -90,9 +90,13 @@ non-empty tuple, so write the list inline (or `as const`); a plain `string[]` wo
 entry is an origin exactly as a URL reports it — lower case, no path, no trailing slash. A missing or
 malformed list fails with `invalid_input` when the action or trigger is defined. Requests outside the list
 fail with the new `credential_scope` error code. An action enforces its own `origins` whatever handle
-it is given, so a spec that stubs the transport still fails on a URL outside them. The Jira actions and
-trigger now require `instanceUrl`: it decides which gateway the credential may reach and, on OAuth,
-which of the token's sites is used.
+it is given, so a spec that stubs the transport still fails on a URL outside them.
+
+Jira's `instanceUrl` (and `actions.jira.resolveJiraBase`) is now checked before any request: it must be
+an `https` site on `*.atlassian.net`, `*.jira.com` or `*.atlassian-us-gov-mod.net`, and that domain picks
+the gateway. Left blank, it is refused on an API-token connection and, on a managed connection, resolves
+only when the token reaches exactly one site; a URL that is none of the token's sites is refused rather
+than replaced by another. Government Cloud needs `instanceUrl` set.
 
 
 Use `none` for actions that need no credential (the utility actions).

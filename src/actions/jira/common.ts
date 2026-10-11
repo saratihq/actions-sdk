@@ -1,4 +1,4 @@
-import type { AuthHandle, BasicScheme } from '../../core/auth';
+import { type AuthHandle, type BasicScheme, transportKind } from '../../core/auth';
 import { ActionError } from '../../core/errors';
 import type { HttpClient, HttpResponse } from '../../core/http/client';
 import type { JsonValue } from '../../core/http/types';
@@ -30,22 +30,34 @@ function parsed(url: string): URL | null {
   }
 }
 
-function siteOrigin(instanceUrl: string): string {
-  const url = parsed(instanceUrl);
-  if (!url || (url.protocol !== 'https:' && url.protocol !== 'http:')) {
-    throw new ActionError({
-      code: 'invalid_input',
-      message: `instanceUrl "${instanceUrl}" is not your site's URL — use e.g. https://your-domain.atlassian.net`,
-      retryable: false,
-      detail: { field: 'instanceUrl' },
-    });
-  }
-  return url.origin;
+const SITE_GATEWAYS: ReadonlyArray<readonly [suffix: string, gateway: string]> = [
+  ['.atlassian.net', GATEWAY],
+  ['.jira.com', GATEWAY],
+  ['.atlassian-us-gov-mod.net', GOV_GATEWAY],
+];
+
+function invalidInstanceUrl(message: string): ActionError {
+  return new ActionError({
+    code: 'invalid_input',
+    message,
+    retryable: false,
+    detail: { field: 'instanceUrl' },
+  });
 }
 
-/** Government Cloud sites have their own gateway, so their credential never reaches the commercial one. */
-function gatewayFor(site: string): string {
-  return new URL(site).hostname.endsWith('.atlassian-us-gov-mod.net') ? GOV_GATEWAY : GATEWAY;
+/** Classify a site before any request: its origin, and the gateway of its cloud — so a credential never crosses clouds. */
+function classifySite(instanceUrl: string): { origin: string; gateway: string } {
+  const url = parsed(instanceUrl);
+  const cloud =
+    url && url.protocol === 'https:' && url.port === '' && !url.username && !url.password
+      ? SITE_GATEWAYS.find(([suffix]) => url.hostname.endsWith(suffix))
+      : undefined;
+  if (!url || !cloud) {
+    throw invalidInstanceUrl(
+      `instanceUrl "${instanceUrl}" is not a Jira Cloud site — use e.g. https://your-domain.atlassian.net, https://your-domain.jira.com or https://your-domain.atlassian-us-gov-mod.net`,
+    );
+  }
+  return { origin: url.origin, gateway: cloud[1] };
 }
 
 /** A Jira REST body; a web page where JSON belongs means the request missed the REST API, so it fails loudly. */
@@ -53,7 +65,10 @@ export function jiraJson<T>(res: HttpResponse<T>): T {
   if (res.data === undefined || typeof res.data === 'string') {
     throw new ActionError({
       code: 'provider_error',
-      message: `Jira answered with ${res.data === undefined ? 'an empty body' : (res.headers['content-type'] ?? 'a non-JSON body')} instead of JSON — set Instance URL to your site, e.g. https://your-domain.atlassian.net`,
+      message:
+        res.data === undefined
+          ? 'Jira returned an empty body where JSON was expected'
+          : `Jira answered with ${res.headers['content-type'] ?? 'a non-JSON body'} instead of JSON — set Instance URL to your site, e.g. https://your-domain.atlassian.net`,
       status: 502,
       retryable: false,
       detail: { provider: 'jira' },
@@ -105,31 +120,43 @@ async function fetchAccessibleResources(
 export async function resolveJiraBase(
   http: HttpClient,
   auth: AuthHandle,
-  instanceUrl: string,
+  instanceUrl?: string,
 ): Promise<string> {
-  const site = siteOrigin(instanceUrl);
-  const gateway = gatewayFor(site);
-  const sites = await fetchAccessibleResources(http, auth, gateway);
-  if (sites.length === 0) return `${site}${API_PATH}`;
-  const matched = sites.find((s) => normaliseSite(s.url) === site);
-  if (!matched) {
-    throw new ActionError({
-      code: 'invalid_input',
-      message: `instanceUrl ${site} is not a site this connection can reach — it can reach ${sites.map((s) => normaliseSite(s.url)).join(', ')}`,
-      retryable: false,
-      detail: { field: 'instanceUrl' },
-    });
+  const site = instanceUrl?.trim() ? classifySite(instanceUrl) : null;
+  // A direct (API-token) credential can't list sites, so without one its cloud can't be known: refuse before sending it.
+  if (!site && transportKind(auth) === 'direct') {
+    throw invalidInstanceUrl(
+      'instanceUrl is required for an API-token connection — set it to your Jira site',
+    );
   }
-  return `${gateway}/ex/jira/${matched.id}${API_PATH}`;
+  const gateway = site?.gateway ?? GATEWAY;
+  const sites = await fetchAccessibleResources(http, auth, gateway);
+  const reachable = sites.map((s) => normaliseSite(s.url)).join(', ');
+  if (site) {
+    if (sites.length === 0) return `${site.origin}${API_PATH}`;
+    const matched = sites.find((s) => normaliseSite(s.url) === site.origin);
+    if (!matched) {
+      throw invalidInstanceUrl(
+        `instanceUrl ${site.origin} is not a site this connection can reach — it can reach ${reachable}`,
+      );
+    }
+    return `${gateway}/ex/jira/${matched.id}${API_PATH}`;
+  }
+  if (sites.length === 1) return `${gateway}/ex/jira/${sites[0]!.id}${API_PATH}`;
+  throw invalidInstanceUrl(
+    sites.length === 0
+      ? 'could not resolve the Jira site from this connection — set instanceUrl to your site'
+      : `this connection can reach several Jira sites (${reachable}) — set instanceUrl to the one to use`,
+  );
 }
 
-/** The "which Jira site" prop: the site's URL decides the gateway and, on OAuth, which of the token's sites is used. */
+/** The "which Jira site" prop: it decides the gateway, and on OAuth which of the token's sites is used. */
 export function instanceUrlProp() {
-  return shortText<true>({
+  return shortText<false>({
     label: 'Instance URL',
     description:
-      'Your Jira Cloud site, e.g. https://your-domain.atlassian.net (or .jira.com; Government Cloud: https://your-domain.atlassian-us-gov-mod.net).',
-    required: true,
+      'Your Jira Cloud site, e.g. https://your-domain.atlassian.net (or .jira.com). Needed for an API-token connection and for Government Cloud (https://your-domain.atlassian-us-gov-mod.net); a managed connection that reaches one site can leave it blank.',
+    required: false,
   });
 }
 

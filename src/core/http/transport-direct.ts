@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { isNativeError } from 'node:util/types';
 
 import type { AuthScheme, DirectCredential } from '../auth';
@@ -43,7 +44,7 @@ export class DirectTransport implements Transport {
 
   async send(request: NormalizedRequest): Promise<NormalizedResponse> {
     const bodyBefore = this.scheme.type === 'custom' ? bodySnapshot(request.body) : undefined;
-    const prepared = this.applyAuth(request);
+    const prepared = this.applyAuth(request, bodyBefore);
     if (this.scope) prepared.url = this.scope.admit(prepared.url).href;
     const credentialHeaders = changedHeaders(request.headers, prepared.headers);
     const credentialParams = changedParams(request.url, prepared.url);
@@ -90,7 +91,7 @@ export class DirectTransport implements Transport {
   }
 
   /** Attach the credential to a COPY of the request (never mutate the caller's object). */
-  private applyAuth(request: NormalizedRequest): NormalizedRequest {
+  private applyAuth(request: NormalizedRequest, bodySnapshotBefore?: string): NormalizedRequest {
     const prepared: NormalizedRequest = { ...request, headers: { ...request.headers } };
     const cred = this.credential;
 
@@ -117,10 +118,13 @@ export class DirectTransport implements Transport {
           prepared.headers['authorization'] = `Basic ${encoded}`;
         }
         break;
-      case 'custom':
-        if (prepared.body !== undefined) prepared.body = copyBody(prepared.body);
+      case 'custom': {
+        const copy = prepared.body === undefined ? undefined : copyBody(prepared.body, bodySnapshotBefore);
+        if (copy === undefined) delete prepared.body;
+        else prepared.body = copy;
         this.scheme.apply(prepared, cred);
         break;
+      }
       default: {
         // Exhaustiveness guard — a new scheme type must be handled explicitly.
         const _exhaustive: never = this.scheme;
@@ -146,20 +150,28 @@ async function readBody<T>(url: string, read: () => Promise<T>): Promise<T> {
   }
 }
 
-// apply() edits a copy, so a retry or a reused body never starts out already carrying the credential.
-function copyBody(body: RequestBody): RequestBody {
-  if (isMultipartBody(body)) return { [MULTIPART]: true, parts: body.parts.map((part) => ({ ...part })) };
+// apply() edits a copy taken through the wire form, so it sends what 0.1.6 sent and a retry or reused body starts clean.
+function copyBody(body: RequestBody, wire: string | undefined): RequestBody | undefined {
+  if (isMultipartBody(body)) {
+    return {
+      [MULTIPART]: true,
+      parts: body.parts.map((part) =>
+        part.type === 'file' ? { ...part, data: Buffer.from(part.data) } : { ...part },
+      ),
+    };
+  }
   if (isFormBody(body))
     return { [FORM]: true, fields: body.fields.map(([name, value]) => [name, value] as const) };
-  return structuredClone(body);
+  return wire === undefined ? undefined : (JSON.parse(wire) as RequestBody);
 }
 
-// A file part is summarised by its size: a credential rides a field, never a file's bytes.
 function bodySnapshot(body: RequestBody | undefined): string | undefined {
   if (body === undefined) return undefined;
   if (isMultipartBody(body)) {
     return JSON.stringify(
-      body.parts.map((part) => (part.type === 'file' ? { ...part, data: part.data.byteLength } : part)),
+      body.parts.map((part) =>
+        part.type === 'file' ? { ...part, data: createHash('sha256').update(part.data).digest('hex') } : part,
+      ),
     );
   }
   return JSON.stringify(isFormBody(body) ? body.fields : body);

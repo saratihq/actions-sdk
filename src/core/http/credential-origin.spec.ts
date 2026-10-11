@@ -7,6 +7,7 @@ import {
   withAllowedHosts,
 } from '../../testing/loopback-server';
 import { HttpClient } from './client';
+import type { JsonValue } from './types';
 import { paginate } from './pagination';
 
 type Unscoped<T> = T extends unknown ? Omit<T, 'origins'> : never;
@@ -271,6 +272,80 @@ describe('a credential never reaches a foreign origin — real sockets', () => {
       ),
     ).rejects.toMatchObject({ code: 'credential_scope' });
     expect(foreign.hits).toHaveLength(0);
+  });
+
+  describe('a custom scheme sends a body exactly as 0.1.6 did', () => {
+    class Money {
+      constructor(private readonly cents: number) {}
+      toJSON(): string {
+        return (this.cents / 100).toFixed(2);
+      }
+    }
+    const headerOnly = () =>
+      createDirectAuth(
+        {
+          type: 'custom',
+          origins: [providerOrigin],
+          apply: (req, cred) => {
+            if (cred.type === 'apiKey') req.headers['x-signature'] = cred.value;
+          },
+        },
+        { type: 'apiKey', value: SECRET },
+      );
+    const BODIES: Array<[string, unknown]> = [
+      ['a prototype toJSON leaf', { amount: new Money(1999), currency: 'usd' }],
+      ['a Buffer leaf', { raw: Buffer.from('hi') }],
+      ['a URL leaf', { callback: new URL('https://example.com/cb') }],
+    ];
+
+    it.each(BODIES)('%s reaches the provider as JSON.stringify of the original', async (_label, body) => {
+      await withAllowedHosts('127.0.0.1', () =>
+        http.post(`${providerOrigin}/ok`, { auth: headerOnly(), body: body as JsonValue }),
+      );
+      expect(provider.hits.map((h) => h.body)).toEqual([JSON.stringify(body)]);
+    });
+
+    it.each(BODIES)(
+      '%s follows a 307 to another origin, since the scheme never changed it',
+      async (_label, body) => {
+        const res = await withAllowedHosts('127.0.0.1', () =>
+          http.post(redirectUrl(`${foreignOrigin}/landing`, 307), {
+            auth: headerOnly(),
+            body: body as JsonValue,
+          }),
+        );
+        expect(res.data).toBe('foreign');
+        expect(foreign.hits.map((h) => [h.body, h.headers['x-signature']])).toEqual([
+          [JSON.stringify(body), undefined],
+        ]);
+      },
+    );
+
+    it('catches a same-length in-place edit of a file part, and leaves the caller its own bytes', async () => {
+      const data = Buffer.from('{"token":"XXXXXX"}');
+      const auth = createDirectAuth(
+        {
+          type: 'custom',
+          origins: [providerOrigin],
+          apply: (req, cred) => {
+            const parts = (req.body as unknown as { parts: Array<{ type: string; data?: Buffer }> }).parts;
+            const file = parts.find((p) => p.type === 'file')!.data!;
+            if (cred.type === 'apiKey') file.write(cred.value, file.indexOf('XXXXXX'));
+          },
+        },
+        { type: 'apiKey', value: SECRET },
+      );
+      await expect(
+        withAllowedHosts('127.0.0.1', () =>
+          http.post(redirectUrl(`${foreignOrigin}/landing`, 307), {
+            auth,
+            multipart: { files: { meta: { filename: 'meta.json', data, mimeType: 'application/json' } } },
+          }),
+        ),
+      ).rejects.toMatchObject({ code: 'credential_scope' });
+      expect(foreign.hits).toHaveLength(0);
+      expect(data.toString()).toBe('{"token":"XXXXXX"}');
+    });
   });
 
   describe('a custom scheme that edits the body in place', () => {
