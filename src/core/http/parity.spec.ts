@@ -77,6 +77,12 @@ describe('guarded hop — parity with plain fetch for ordinary requests', () => 
     return { ...rest, body: plain(body), headers: kept };
   };
 
+  // The server stamps `date` per response, so two runs straddling a second differ there and nowhere else.
+  const withoutDate = (res: HttpResponse): HttpResponse => ({
+    ...res,
+    headers: Object.fromEntries(Object.entries(res.headers).filter(([name]) => name !== 'date')),
+  });
+
   const send = async (c: Case, fetchImpl?: FetchLike) => {
     const before = server.hits.length;
     const scheme: AuthScheme = c.scheme ? { ...c.scheme, origins: [base] } : { type: 'none' };
@@ -86,7 +92,7 @@ describe('guarded hop — parity with plain fetch for ordinary requests', () => 
       : createDirectAuth(scheme, credential);
     const result: HttpResponse | { failed: string } = await http
       .request(c.method, `${base}${c.path}`, { auth, ...c.options })
-      .catch((err: Error) => ({ failed: err.message }));
+      .then(withoutDate, (err: Error) => ({ failed: err.message }));
     const hits = server.hits.slice(before).map(withoutBoundary);
     return { result, hits };
   };
