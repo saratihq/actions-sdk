@@ -66,7 +66,9 @@ export const sendChannelMessage = defineAction({
   on a managed connection the broker follows redirects itself.
 
 See [`docs/writing-an-action.md`](docs/writing-an-action.md) and
-[`docs/writing-a-trigger.md`](docs/writing-a-trigger.md) for full walkthroughs.
+[`docs/writing-a-trigger.md`](docs/writing-a-trigger.md) for full walkthroughs. Upgrading from 0.1? Read
+[Upgrading to 0.2](https://github.com/saratihq/actions-sdk/blob/main/docs/writing-an-action.md#upgrading-to-02):
+every credentialed scheme now declares `origins`.
 
 ## Private addresses
 

@@ -263,10 +263,12 @@ describe('instance URLs on each vendor-documented cloud domain are reached; any 
       return { status: 201, headers: {}, data: { id: '10001', key: 'ENG-1' } };
     });
 
-  it('a 429 site lookup with the field blank is a retryable error after one request, not a config error', async () => {
+  const noRetry = () => new HttpClient({ retry: { retries: 0 } });
+
+  it('a 429 site lookup with the field blank is a retryable error, not a config error', async () => {
     const broker = probeFailing(() => ({ status: 429, headers: { 'retry-after': '5' }, data: null }));
     await expect(
-      createIssue.execute({ auth: createAuth(jiraAuth, broker), props: issueProps }),
+      createIssue.execute({ auth: createAuth(jiraAuth, broker), props: issueProps, http: noRetry() }),
     ).rejects.toMatchObject({
       code: 'http_error',
       status: 429,
@@ -281,6 +283,7 @@ describe('instance URLs on each vendor-documented cloud domain are reached; any 
       createIssue.execute({
         auth: createAuth(jiraAuth, broker),
         props: { ...issueProps, instanceUrl: 'https://acme.atlassian.net' },
+        http: noRetry(),
       }),
     ).rejects.toMatchObject({ code: 'http_error', status: 503, retryable: true });
     expect(broker.requests.map((r) => new URL(r.url).pathname)).toEqual([
@@ -299,6 +302,76 @@ describe('instance URLs on each vendor-documented cloud domain are reached; any 
         http: new HttpClient({ retry: { retries: 0 } }),
       }),
     ).rejects.toMatchObject({ code: 'transport_unreachable', retryable: true });
+  });
+
+  it('a site lookup that 503s once is retried by the client like any other call, and the step resolves', async () => {
+    let lookups = 0;
+    const broker = new FakeTransport((req): NormalizedResponse => {
+      if (new URL(req.url).pathname === '/oauth/token/accessible-resources') {
+        lookups += 1;
+        return lookups === 1
+          ? { status: 503, headers: {}, data: null }
+          : { status: 200, headers: {}, data: [{ id: 'cloud-1', url: 'https://acme.atlassian.net' }] };
+      }
+      return { status: 201, headers: {}, data: { id: '10001', key: 'ENG-1' } };
+    });
+    await expect(
+      createIssue.execute({
+        auth: createAuth(jiraAuth, broker),
+        props: issueProps,
+        http: new HttpClient({ retry: { retries: 1, baseDelayMs: 1, maxDelayMs: 1, jitter: false } }),
+      }),
+    ).resolves.toEqual({ id: '10001', key: 'ENG-1' });
+    expect(broker.requests.map((r) => new URL(r.url).pathname)).toEqual([
+      '/oauth/token/accessible-resources',
+      '/oauth/token/accessible-resources',
+      '/ex/jira/cloud-1/rest/api/3/issue',
+    ]);
+  });
+
+  it('a site lookup that answers 2xx with something other than a list is a provider error', async () => {
+    const broker = probeFailing(() => ({ status: 200, headers: {}, data: '<html>maintenance</html>' }));
+    await expect(
+      createIssue.execute({ auth: createAuth(jiraAuth, broker), props: issueProps }),
+    ).rejects.toMatchObject({
+      code: 'provider_error',
+      message: "Jira's site lookup returned no list",
+    });
+    expect(broker.requests).toHaveLength(1);
+  });
+
+  it('a broker credential the lookup forbids (403) with a site set falls back to the site itself', async () => {
+    const broker = probeFailing(() => ({ status: 403, headers: {}, data: null }));
+    await expect(
+      createIssue.execute({
+        auth: createAuth(jiraAuth, broker),
+        props: { ...issueProps, instanceUrl: 'https://acme.atlassian.net' },
+      }),
+    ).resolves.toEqual({ id: '10001', key: 'ENG-1' });
+    expect(broker.requests.map((r) => r.url)).toEqual([
+      `${GATEWAY}/oauth/token/accessible-resources`,
+      'https://acme.atlassian.net/rest/api/3/issue',
+    ]);
+  });
+
+  it('a direct OAuth bearer with a site set resolves through its gateway, as a 3LO token must', async () => {
+    const { urls, fetchImpl } = recorder((url) =>
+      url.pathname === '/oauth/token/accessible-resources'
+        ? json([{ id: 'cloud-1', url: 'https://acme.atlassian.net' }])
+        : json({ id: '1', key: 'ENG-1' }),
+    );
+    const auth = createDirectAuth(
+      { type: 'oauth2', origins: jiraAuth.origins },
+      { type: 'bearer', token: 'tok' },
+      { fetchImpl },
+    );
+    await expect(
+      getIssue.execute({ auth, props: { instanceUrl: 'https://acme.atlassian.net', issueIdOrKey: 'ENG-1' } }),
+    ).resolves.toMatchObject({ key: 'ENG-1' });
+    expect(urls).toEqual([
+      `${GATEWAY}/oauth/token/accessible-resources`,
+      `${GATEWAY}/ex/jira/cloud-1/rest/api/3/issue/ENG-1`,
+    ]);
   });
 
   it('a broker credential that cannot list sites (401) with a site set falls back to the site itself', async () => {

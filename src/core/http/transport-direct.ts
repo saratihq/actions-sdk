@@ -45,7 +45,7 @@ export class DirectTransport implements Transport {
   async send(request: NormalizedRequest): Promise<NormalizedResponse> {
     const custom = this.scheme.type === 'custom';
     const bodyBefore = custom ? bodyFingerprint(request.body) : undefined;
-    const prepared = this.applyAuth(request, bodyBefore);
+    const prepared = await this.applyAuth(request, bodyBefore);
     if (this.scope) prepared.url = this.scope.admit(prepared.url).href;
     const credentialHeaders = changedHeaders(request.headers, prepared.headers);
     const credentialParams = changedParams(request.url, prepared.url);
@@ -93,7 +93,10 @@ export class DirectTransport implements Transport {
   }
 
   /** Attach the credential to a COPY of the request (never mutate the caller's object). */
-  private applyAuth(request: NormalizedRequest, bodyFingerprintBefore?: string): NormalizedRequest {
+  private async applyAuth(
+    request: NormalizedRequest,
+    bodyFingerprintBefore?: string,
+  ): Promise<NormalizedRequest> {
     const prepared: NormalizedRequest = { ...request, headers: { ...request.headers } };
     const cred = this.credential;
 
@@ -124,14 +127,15 @@ export class DirectTransport implements Transport {
         const copy = prepared.body === undefined ? undefined : copyBody(prepared.body, bodyFingerprintBefore);
         if (copy === undefined) delete prepared.body;
         else prepared.body = copy;
-        const applied: unknown = this.scheme.apply(prepared, cred);
-        if (typeof (applied as { then?: unknown } | null)?.then === 'function') {
-          Promise.resolve(applied).catch(() => undefined);
+        try {
+          await this.scheme.apply(prepared, cred);
+        } catch (err) {
+          if (err instanceof ActionError) throw err;
           throw new ActionError({
             code: 'invalid_input',
-            message:
-              "a custom scheme's apply must be synchronous — it returned a promise, so nothing was sent",
+            message: `a custom scheme's apply failed, so nothing was sent: ${err instanceof Error ? err.message : String(err)}`,
             retryable: false,
+            cause: err,
           });
         }
         break;

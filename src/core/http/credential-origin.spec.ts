@@ -1,4 +1,4 @@
-import type { AuthScheme, CustomScheme, DirectCredential, NoneScheme } from '../auth';
+import type { AuthScheme, CredentialOrigins, DirectCredential, NoneScheme } from '../auth';
 import { createDirectAuth } from '../auth-factories';
 import {
   type LoopbackHit,
@@ -8,7 +8,7 @@ import {
 } from '../../testing/loopback-server';
 import { HttpClient } from './client';
 import { guardedFetch } from './guarded-fetch';
-import type { JsonValue, NormalizedRequest } from './types';
+import type { JsonValue } from './types';
 import { paginate } from './pagination';
 
 type Unscoped<T> = T extends unknown ? Omit<T, 'origins'> : never;
@@ -356,29 +356,58 @@ describe('a credential never reaches a foreign origin — real sockets', () => {
     });
   });
 
-  it('refuses an async apply before anything is sent, so its late signature can never ride a redirect', async () => {
+  const asyncSigner = (origins: CredentialOrigins) =>
+    createDirectAuth(
+      {
+        type: 'custom',
+        origins,
+        apply: async (req, cred) => {
+          const sig = await Promise.resolve(`sig-${cred.type === 'apiKey' ? cred.value : ''}`);
+          req.headers['x-signature'] = sig;
+        },
+      },
+      { type: 'apiKey', value: SECRET },
+    );
+
+  it('awaits an async apply, so its signature reaches the provider', async () => {
+    await withAllowedHosts('127.0.0.1', () =>
+      http.get(`${providerOrigin}/ok`, { auth: asyncSigner([providerOrigin]) }),
+    );
+    expect(provider.hits.map((h) => h.headers['x-signature'])).toEqual([`sig-${SECRET}`]);
+  });
+
+  it('never carries an async signature across a redirect to another origin', async () => {
+    const res = await withAllowedHosts('127.0.0.1', () =>
+      http.post(redirectUrl(`${foreignOrigin}/landing`, 307), {
+        auth: asyncSigner([providerOrigin]),
+        body: { a: 1 },
+      }),
+    );
+    expect(res.data).toBe('foreign');
+    expect(provider.hits.map((h) => h.headers['x-signature'])).toEqual([`sig-${SECRET}`]);
+    expect(foreign.hits.map((h) => h.headers['x-signature'])).toEqual([undefined]);
+  });
+
+  it('a custom apply that rejects is a typed error, and nothing is sent', async () => {
     const auth = createDirectAuth(
       {
         type: 'custom',
         origins: [providerOrigin],
-        apply: ((req: NormalizedRequest, cred: DirectCredential) =>
-          Promise.resolve(`sig-${cred.type === 'apiKey' ? cred.value : ''}`).then((sig) => {
-            req.headers['x-signature'] = sig;
-          })) as unknown as CustomScheme['apply'],
+        apply: async () => {
+          await Promise.resolve();
+          throw new Error('signing key unavailable');
+        },
       },
       { type: 'apiKey', value: SECRET },
     );
     await expect(
-      withAllowedHosts('127.0.0.1', () =>
-        http.post(redirectUrl(`${foreignOrigin}/landing`, 307), { auth, body: { a: 1 } }),
-      ),
+      withAllowedHosts('127.0.0.1', () => http.get(`${providerOrigin}/ok`, { auth })),
     ).rejects.toMatchObject({
       code: 'invalid_input',
-      message: expect.stringContaining('must be synchronous'),
+      retryable: false,
+      message: expect.stringContaining('signing key unavailable'),
     });
-    await new Promise((resolve) => setTimeout(resolve, 20));
     expect(provider.hits).toHaveLength(0);
-    expect(foreign.hits).toHaveLength(0);
   });
 
   it('a header object mutated after the first hop never reaches a later hop', async () => {

@@ -103,21 +103,29 @@ async function listSites(
   auth: AuthHandle,
   gateway: string,
 ): Promise<AtlassianResource[] | null> {
-  const res = await http.get<unknown>(`${gateway}/oauth/token/accessible-resources`, {
-    auth,
-    throwOnError: false,
-  });
-  if (res.status === 401 || res.status === 403) return null;
-  if (res.status < 200 || res.status >= 300) {
+  let data: unknown;
+  try {
+    ({ data } = await http.get<unknown>(`${gateway}/oauth/token/accessible-resources`, { auth }));
+  } catch (err) {
+    if (
+      err instanceof ActionError &&
+      err.code === 'http_error' &&
+      (err.status === 401 || err.status === 403)
+    ) {
+      return null;
+    }
+    throw err;
+  }
+  if (!Array.isArray(data)) {
     throw new ActionError({
-      code: 'http_error',
-      message: `could not list the Jira sites this connection reaches (HTTP ${res.status})`,
-      status: res.status,
+      code: 'provider_error',
+      message: "Jira's site lookup returned no list",
+      status: 502,
+      retryable: false,
       detail: { provider: 'jira' },
     });
   }
-  if (!Array.isArray(res.data)) return [];
-  return res.data.filter(
+  return data.filter(
     (r): r is AtlassianResource =>
       typeof r === 'object' &&
       r !== null &&
@@ -133,8 +141,8 @@ export async function resolveJiraBase(
   instanceUrl?: string,
 ): Promise<string> {
   const site = instanceUrl?.trim() ? classifySite(instanceUrl) : null;
-  // A direct (API-token) credential can't list sites: it goes straight to the site, and without one its cloud is unknown.
-  if (transportKind(auth) === 'direct') {
+  // A direct API token (Basic) can't list sites: it goes straight to the site, and without one its cloud is unknown.
+  if (transportKind(auth) === 'direct' && auth.scheme === 'basic') {
     if (!site)
       throw invalidInstanceUrl(
         'instanceUrl is required for an API-token connection — set it to your Jira site',
