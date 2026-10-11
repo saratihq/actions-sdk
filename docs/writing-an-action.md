@@ -90,7 +90,9 @@ non-empty tuple, so write the list inline (or `as const`); a plain `string[]` wo
 entry is an origin exactly as a URL reports it — lower case, no path, no trailing slash. A missing or
 malformed list fails with `invalid_input` when the action or trigger is defined. Requests outside the list
 fail with the new `credential_scope` error code. An action enforces its own `origins` whatever handle
-it is given, so a spec that stubs the transport still fails on a URL outside them.
+it is given, so a spec that stubs the transport still fails on a URL outside them. The Jira actions and
+trigger now require `instanceUrl`: it decides which gateway the credential may reach and, on OAuth,
+which of the token's sites is used.
 
 
 Use `none` for actions that need no credential (the utility actions).

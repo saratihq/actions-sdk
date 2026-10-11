@@ -22,36 +22,38 @@ const API_PATH = '/rest/api/3';
 const GATEWAY = 'https://api.atlassian.com';
 const GOV_GATEWAY = 'https://api.atlassian-us-gov-mod.com';
 
-function siteOrigin(instanceUrl: string): string {
+function parsed(url: string): URL | null {
   try {
-    return new URL(instanceUrl.trim()).origin;
+    return new URL(url.trim());
   } catch {
+    return null;
+  }
+}
+
+function siteOrigin(instanceUrl: string): string {
+  const url = parsed(instanceUrl);
+  if (!url || (url.protocol !== 'https:' && url.protocol !== 'http:')) {
     throw new ActionError({
       code: 'invalid_input',
-      message: `instanceUrl "${instanceUrl}" is not a URL — use your site, e.g. https://your-domain.atlassian.net`,
+      message: `instanceUrl "${instanceUrl}" is not your site's URL — use e.g. https://your-domain.atlassian.net`,
       retryable: false,
       detail: { field: 'instanceUrl' },
     });
   }
-}
-
-/** Root a direct/BYO REST v3 call at the site's origin, so a pasted page URL (…/jira/…, …/browse/X-1) still reaches the API. */
-export function jiraBaseUrl(instanceUrl: string): string {
-  return `${siteOrigin(instanceUrl)}${API_PATH}`;
+  return url.origin;
 }
 
 /** Government Cloud sites have their own gateway, so their credential never reaches the commercial one. */
-function gatewayFor(instanceUrl: string | undefined): string {
-  const host = instanceUrl ? URL.parse(instanceUrl.trim())?.hostname : undefined;
-  return host?.endsWith('.atlassian-us-gov-mod.net') ? GOV_GATEWAY : GATEWAY;
+function gatewayFor(site: string): string {
+  return new URL(site).hostname.endsWith('.atlassian-us-gov-mod.net') ? GOV_GATEWAY : GATEWAY;
 }
 
 /** A Jira REST body; a web page where JSON belongs means the request missed the REST API, so it fails loudly. */
 export function jiraJson<T>(res: HttpResponse<T>): T {
-  if (typeof res.data === 'string') {
+  if (res.data === undefined || typeof res.data === 'string') {
     throw new ActionError({
       code: 'provider_error',
-      message: `Jira answered with ${res.headers['content-type'] ?? 'a non-JSON body'} instead of JSON — set Instance URL to your site, e.g. https://your-domain.atlassian.net`,
+      message: `Jira answered with ${res.data === undefined ? 'an empty body' : (res.headers['content-type'] ?? 'a non-JSON body')} instead of JSON — set Instance URL to your site, e.g. https://your-domain.atlassian.net`,
       status: 502,
       retryable: false,
       detail: { provider: 'jira' },
@@ -72,7 +74,7 @@ export interface AtlassianResource {
 
 /** Normalise a site URL for comparison: its origin, which ignores case, a trailing slash and any page path. */
 function normaliseSite(url: string): string {
-  return URL.parse(url.trim())?.origin ?? url;
+  return parsed(url)?.origin ?? url;
 }
 
 /** List the Jira sites the token can reach; never throws — `[]` means "fall back to the site URL". */
@@ -99,40 +101,35 @@ async function fetchAccessibleResources(
   }
 }
 
-/** Resolve the REST v3 base: the `ex/jira/<cloudId>` gateway on OAuth (a bare site URL 401s), else `instanceUrl`. */
+/** Resolve the REST v3 base: the gateway's `ex/jira/<cloudId>` on OAuth (a bare site URL 401s), else the site itself. */
 export async function resolveJiraBase(
   http: HttpClient,
   auth: AuthHandle,
-  instanceUrl?: string,
+  instanceUrl: string,
 ): Promise<string> {
-  const gateway = gatewayFor(instanceUrl);
+  const site = siteOrigin(instanceUrl);
+  const gateway = gatewayFor(site);
   const sites = await fetchAccessibleResources(http, auth, gateway);
-  if (sites.length > 0) {
-    const matched =
-      instanceUrl !== undefined
-        ? sites.find((s) => normaliseSite(s.url) === normaliseSite(instanceUrl))
-        : undefined;
-    const site = matched ?? sites[0]!;
-    return `${gateway}/ex/jira/${site.id}${API_PATH}`;
+  if (sites.length === 0) return `${site}${API_PATH}`;
+  const matched = sites.find((s) => normaliseSite(s.url) === site);
+  if (!matched) {
+    throw new ActionError({
+      code: 'invalid_input',
+      message: `instanceUrl ${site} is not a site this connection can reach — it can reach ${sites.map((s) => normaliseSite(s.url)).join(', ')}`,
+      retryable: false,
+      detail: { field: 'instanceUrl' },
+    });
   }
-  if (instanceUrl !== undefined && instanceUrl.trim().length > 0) {
-    return jiraBaseUrl(instanceUrl);
-  }
-  throw new ActionError({
-    code: 'invalid_input',
-    message:
-      'could not resolve the Jira site: no OAuth-accessible resources and no instanceUrl provided — set instanceUrl for a direct/BYO connection',
-    retryable: false,
-  });
+  return `${gateway}/ex/jira/${matched.id}${API_PATH}`;
 }
 
-/** The "which Jira site" prop: required for direct/BYO, ignored on managed (see {@link resolveJiraBase}). */
+/** The "which Jira site" prop: the site's URL decides the gateway and, on OAuth, which of the token's sites is used. */
 export function instanceUrlProp() {
-  return shortText<false>({
+  return shortText<true>({
     label: 'Instance URL',
     description:
-      'Your Jira Cloud site, e.g. https://your-domain.atlassian.net (or .jira.com; Government Cloud: https://your-domain.atlassian-us-gov-mod.net). Required for a direct/BYO connection; ignored on a managed connection (resolved from the token).',
-    required: false,
+      'Your Jira Cloud site, e.g. https://your-domain.atlassian.net (or .jira.com; Government Cloud: https://your-domain.atlassian-us-gov-mod.net).',
+    required: true,
   });
 }
 

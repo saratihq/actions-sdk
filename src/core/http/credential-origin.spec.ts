@@ -73,6 +73,12 @@ describe('a credential never reaches a foreign origin — real sockets', () => {
         res.end();
         return;
       }
+      if (url.pathname === '/flaky' && to) {
+        const first = provider.hits.filter((h) => h.url.startsWith('/flaky')).length === 1;
+        res.writeHead(first ? 503 : 307, first ? {} : { location: to });
+        res.end();
+        return;
+      }
       if (url.pathname === '/items') {
         res.setHeader('content-type', 'application/json');
         res.end(JSON.stringify({ items: [hit.url], next: url.searchParams.get('next') }));
@@ -265,6 +271,55 @@ describe('a credential never reaches a foreign origin — real sockets', () => {
       ),
     ).rejects.toMatchObject({ code: 'credential_scope' });
     expect(foreign.hits).toHaveLength(0);
+  });
+
+  describe('a custom scheme that edits the body in place', () => {
+    const inPlace = () =>
+      createDirectAuth(
+        {
+          type: 'custom',
+          origins: [providerOrigin],
+          apply: (req, cred) => {
+            if (cred.type === 'apiKey') (req.body as Record<string, unknown>).api_key = cred.value;
+          },
+        },
+        { type: 'apiKey', value: SECRET },
+      );
+
+    it('refuses the retried attempt that would replay the signed body to another origin, and leaves the caller its own body', async () => {
+      const retrying = new HttpClient({
+        retry: { retries: 1, baseDelayMs: 1, maxDelayMs: 1, jitter: false },
+      });
+      const body = { a: 1 };
+      await expect(
+        withAllowedHosts('127.0.0.1', () =>
+          retrying.put(`${providerOrigin}/flaky?to=${encodeURIComponent(`${foreignOrigin}/landing`)}`, {
+            auth: inPlace(),
+            body,
+          }),
+        ),
+      ).rejects.toMatchObject({ code: 'credential_scope' });
+      expect(provider.hits.map((h) => h.body)).toEqual([
+        `{"a":1,"api_key":"${SECRET}"}`,
+        `{"a":1,"api_key":"${SECRET}"}`,
+      ]);
+      expect(foreign.hits).toHaveLength(0);
+      expect(body).toEqual({ a: 1 });
+    });
+
+    it('refuses a second call that reuses the same body object, and leaves the caller its own body', async () => {
+      const auth = inPlace();
+      const body = { a: 1 };
+      await withAllowedHosts('127.0.0.1', () => http.put(`${providerOrigin}/ok`, { auth, body }));
+      expect(body).toEqual({ a: 1 });
+      await expect(
+        withAllowedHosts('127.0.0.1', () =>
+          http.put(redirectUrl(`${foreignOrigin}/landing`, 307), { auth, body }),
+        ),
+      ).rejects.toMatchObject({ code: 'credential_scope' });
+      expect(foreign.hits).toHaveLength(0);
+      expect(body).toEqual({ a: 1 });
+    });
   });
 
   describe('a custom scheme that signs the body', () => {

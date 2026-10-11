@@ -9,7 +9,9 @@ import { calendlyAuth } from './calendly/common';
 import { listEventTypes } from './calendly/events';
 import { githubTokenAuth, listIssues } from './github/list-issues';
 import { jiraAuth } from './jira/common';
-import { getIssue } from './jira/issues';
+import { listComments } from './jira/comments';
+import { createIssue, getIssue } from './jira/issues';
+import { newIssue } from './jira/new-issue.polling';
 import { mailchimpAuth } from './mailchimp/common';
 import { listAudiences } from './mailchimp/lists';
 import { outlookAuth } from './outlook/common';
@@ -258,6 +260,72 @@ describe('instance URLs on each vendor-documented cloud domain are reached; any 
       `${GOV_GATEWAY}/oauth/token/accessible-resources`,
       `${GOV_GATEWAY}/ex/jira/cloud-1/rest/api/3/issue/ENG-1`,
     ]);
+  });
+
+  it.each(['', '   ', 'acme.atlassian-us-gov-mod.net', 'acme.atlassian.net:443'])(
+    'jira instanceUrl %j is refused before any request, so no credential reaches either gateway',
+    async (instanceUrl) => {
+      const { urls, fetchImpl } = recorder(() => json({}));
+      await expect(
+        getIssue.execute({
+          auth: createDirectAuth(
+            jiraAuth,
+            { type: 'basic', username: 'gov@agency.gov', password: 'GOVTOKEN' },
+            { fetchImpl },
+          ),
+          props: { instanceUrl, issueIdOrKey: 'ENG-1' },
+        }),
+      ).rejects.toMatchObject({
+        code: 'invalid_input',
+        message: expect.stringMatching(/instanceUrl|Instance URL/),
+      });
+      expect(urls).toEqual([]);
+    },
+  );
+
+  it("an instanceUrl that is none of the OAuth token's sites is refused, never sent to another tenant", async () => {
+    const { urls, fetchImpl } = recorder((url) =>
+      url.pathname === '/oauth/token/accessible-resources'
+        ? json([
+            { id: 'prod-id', url: 'https://acme.atlassian.net' },
+            { id: 'sandbox-id', url: 'https://acme-sandbox.atlassian.net' },
+          ])
+        : json({ id: '1', key: 'ENG-1' }),
+    );
+    await expect(
+      createIssue.execute({
+        auth: createDirectAuth(jiraAuth, basic, { fetchImpl }),
+        props: {
+          instanceUrl: 'https://acme-sandbx.atlassian.net',
+          project: 'ENG',
+          summary: 's',
+          issueType: 'Task',
+        },
+      }),
+    ).rejects.toMatchObject({
+      code: 'invalid_input',
+      message: expect.stringContaining('https://acme.atlassian.net, https://acme-sandbox.atlassian.net'),
+    });
+    expect(urls).toEqual([`${GATEWAY}/oauth/token/accessible-resources`]);
+  });
+
+  it('an empty Jira body where JSON belongs is a provider_error, not a TypeError', async () => {
+    const { fetchImpl } = recorder((url) =>
+      url.pathname === '/oauth/token/accessible-resources' ? fakeResponse(401, '') : fakeResponse(204, ''),
+    );
+    const auth = createDirectAuth(jiraAuth, basic, { fetchImpl });
+    const instanceUrl = 'https://acme.atlassian.net';
+    await expect(
+      listComments.execute({ auth, props: { instanceUrl, issueIdOrKey: 'ENG-1' } }),
+    ).rejects.toMatchObject({
+      code: 'provider_error',
+      message: expect.stringContaining('an empty body'),
+    });
+    const store = new MemoryStore();
+    await store.set('lastPolledAt', '2026-10-01T00:00:00.000Z');
+    await expect(newIssue.runPoll({ auth, props: { instanceUrl }, store })).rejects.toMatchObject({
+      code: 'provider_error',
+    });
   });
 
   it('a Jira site that answers a web page instead of JSON fails rather than returning the page', async () => {

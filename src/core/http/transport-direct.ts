@@ -8,9 +8,11 @@ import { guardedFetch } from './guarded-fetch';
 import { encodeMultipart } from './multipart';
 import {
   appendQuery,
+  FORM,
   type FetchLike,
   isFormBody,
   isMultipartBody,
+  MULTIPART,
   type NormalizedRequest,
   type NormalizedResponse,
   type RequestBody,
@@ -116,6 +118,7 @@ export class DirectTransport implements Transport {
         }
         break;
       case 'custom':
+        if (prepared.body !== undefined) prepared.body = copyBody(prepared.body);
         this.scheme.apply(prepared, cred);
         break;
       default: {
@@ -141,6 +144,14 @@ async function readBody<T>(url: string, read: () => Promise<T>): Promise<T> {
     const reason = isNativeError(cause) ? cause : isNativeError(err) ? err : new Error(String(err));
     throw transportFailure(new URL(url).origin, reason, 'response');
   }
+}
+
+// apply() edits a copy, so a retry or a reused body never starts out already carrying the credential.
+function copyBody(body: RequestBody): RequestBody {
+  if (isMultipartBody(body)) return { [MULTIPART]: true, parts: body.parts.map((part) => ({ ...part })) };
+  if (isFormBody(body))
+    return { [FORM]: true, fields: body.fields.map(([name, value]) => [name, value] as const) };
+  return structuredClone(body);
 }
 
 // A file part is summarised by its size: a credential rides a field, never a file's bytes.
