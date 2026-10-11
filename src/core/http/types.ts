@@ -89,11 +89,15 @@ export type FetchLike = (
     /** String for JSON/text; raw bytes for a multipart body. */
     body?: string | Buffer | Uint8Array;
     signal?: AbortSignal;
+    /** `'manual'` hands back a redirect response unfollowed; the default follows it. */
+    redirect?: 'follow' | 'manual';
   },
 ) => Promise<FetchLikeResponse>;
 
 export interface FetchLikeResponse {
   status: number;
+  /** The URL the response came from, after any redirects; absent from a fetch that does not report it. */
+  url?: string;
   headers: { forEach(cb: (value: string, key: string) => void): void };
   text(): Promise<string>;
   /** Raw response bytes — used when the request asked for `responseType: 'binary'`. */

@@ -12,9 +12,11 @@ export interface NormalizedFailure {
 export type ActionErrorCode =
   | 'invalid_input'
   | 'ssrf_blocked'
+  | 'unresolvable_host'
   | 'auth_missing'
   | 'auth_unsupported'
   | 'transport_unreachable'
+  | 'transport_interrupted'
   | 'transport_timeout'
   | 'http_error'
   | 'provider_error'
@@ -63,30 +65,146 @@ export function isRetryableStatus(status: number): boolean {
   return status >= 500 && status <= 599;
 }
 
+// These failures never left this machine, but only when the call that failed was the connect or the lookup itself.
+const CONNECT_STAGE = new Set([
+  'ECONNREFUSED',
+  'ETIMEDOUT',
+  'EAI_AGAIN',
+  'ENOTFOUND',
+  'EHOSTUNREACH',
+  'ENETUNREACH',
+]);
+const CONNECT_SYSCALLS = new Set(['connect', 'getaddrinfo']);
+// undici raises these before it dispatches anything.
+const NOT_DISPATCHED = new Set(['UND_ERR_CONNECT_TIMEOUT', 'UND_ERR_CLOSED', 'UND_ERR_DESTROYED']);
+// The connection broke once the request may have gone out.
+const IN_FLIGHT = new Set([
+  'ECONNRESET',
+  'EPIPE',
+  'UND_ERR_HEADERS_TIMEOUT',
+  'UND_ERR_BODY_TIMEOUT',
+  'UND_ERR_SOCKET',
+]);
+// Raised on this machine while building the request: the step's input is at fault, and sending again cannot help.
+const INVALID_REQUEST = new Set([
+  'UND_ERR_INVALID_ARG',
+  'UND_ERR_NOT_SUPPORTED',
+  'UND_ERR_REQ_CONTENT_LENGTH_MISMATCH',
+]);
+const LOCAL_ARGUMENT = /^ERR_INVALID_ARG_/;
+const TLS_HANDSHAKE = /^ERR_(TLS|SSL)_|CERT|SIGNATURE/;
+const CERTIFICATE = /CERT|SIGNATURE/;
+const BODY_DECODE = /^Z_|^ERR__|^ERR_BROTLI|^ERR_ZLIB|^ZSTD_error_/;
+
+function codeOf(err: unknown): string {
+  const code = (err as { code?: unknown } | null)?.code;
+  return typeof code === 'string' ? code : '';
+}
+
+function nested(err: unknown): unknown[] {
+  const errors = (err as { errors?: unknown } | null)?.errors;
+  return Array.isArray(errors) ? errors : [];
+}
+
+/** A failure's reason in words, reading an AggregateError's inner errors (a host whose every address failed). */
+export function failureReason(err: unknown): string {
+  const inner = nested(err);
+  if (inner.length > 0) return [...new Set(inner.map(failureReason))].join('; ');
+  const { message, name } = err as { message?: string; name?: string };
+  return message || codeOf(err) || (name && name !== 'Error' ? name : '') || 'no reason given';
+}
+
+function neverSent(err: unknown): boolean {
+  const inner = nested(err);
+  if (inner.length > 0) return inner.every(neverSent);
+  const syscall = (err as { syscall?: unknown } | null)?.syscall;
+  if (typeof syscall === 'string') return CONNECT_SYSCALLS.has(syscall);
+  const code = codeOf(err);
+  return NOT_DISPATCHED.has(code) || TLS_HANDSHAKE.test(code) || CONNECT_STAGE.has(code);
+}
+
+function failure(
+  code: ActionErrorCode,
+  message: string,
+  retryable: boolean,
+  cause: Error,
+  detail: { origin: string; reason: string },
+): ActionError {
+  return new ActionError({ code, message, retryable, cause, detail });
+}
+
+/** True for a certificate that failed verification, as opposed to any other TLS failure. */
+export function isCertificateFailure(err: unknown): boolean {
+  return CERTIFICATE.test(codeOf(err));
+}
+
+/** True for a failure in the TLS handshake, before any request bytes were written. */
+export function isTlsFailure(err: unknown): boolean {
+  return TLS_HANDSHAKE.test(codeOf(err));
+}
+
+/** A failure before anything was written to `origin`: never sent, so retried, unless a certificate was refused. */
+export function neverReached(origin: string, cause: Error): ActionError {
+  const reason = failureReason(cause);
+  return failure(
+    'transport_unreachable',
+    `could not reach ${origin}: ${reason}`,
+    !CERTIFICATE.test(codeOf(cause)),
+    cause,
+    {
+      origin,
+      reason,
+    },
+  );
+}
+
+/** Classify a broken network hop by where it broke: a request that could not be built, a host never reached, a reply that was not HTTP, or a connection lost once the request may have gone out. */
+export function transportFailure(origin: string, cause: Error, stage: 'request' | 'response'): ActionError {
+  const reason = failureReason(cause);
+  const detail = { origin, reason };
+  const code = codeOf(cause);
+  if (BODY_DECODE.test(code)) {
+    return failure(
+      'provider_error',
+      `${origin} sent a response body that could not be decoded: ${reason}`,
+      false,
+      cause,
+      detail,
+    );
+  }
+  if (stage === 'request' && (INVALID_REQUEST.has(code) || LOCAL_ARGUMENT.test(code))) {
+    return failure(
+      'invalid_input',
+      `the request to ${origin} could not be sent: ${reason}`,
+      false,
+      cause,
+      detail,
+    );
+  }
+  if (cause.name === 'HTTPParserError' || code.startsWith('HPE_')) {
+    return failure('http_error', `${origin} did not answer with HTTP: ${reason}`, false, cause, detail);
+  }
+  if (stage === 'request' && neverSent(cause)) return neverReached(origin, cause);
+  const when = stage === 'response' ? 'while reading the response' : 'possibly after the request was sent';
+  return failure(
+    'transport_interrupted',
+    `the connection to ${origin} broke ${when}: ${reason}`,
+    true,
+    cause,
+    detail,
+  );
+}
+
 /** Normalise ANY thrown value to {@link NormalizedFailure}; unrecognised throws are non-retryable so a bug never spins a retry loop. */
 export function normalizeError(err: unknown): NormalizedFailure {
   if (err instanceof ActionError) return err.toFailure();
 
   if (err instanceof Error) {
-    const rawCode = (err as { code?: unknown }).code;
-    const code = typeof rawCode === 'string' ? rawCode : '';
-    // fetch/undici/Node network codes → status 0, retryable.
-    const NETWORKISH = new Set([
-      'ECONNRESET',
-      'ECONNREFUSED',
-      'ETIMEDOUT',
-      'EAI_AGAIN',
-      'ENOTFOUND',
-      'EPIPE',
-      'UND_ERR_CONNECT_TIMEOUT',
-      'UND_ERR_HEADERS_TIMEOUT',
-      'UND_ERR_BODY_TIMEOUT',
-      'UND_ERR_SOCKET',
-    ]);
+    const code = codeOf(err);
     if (err.name === 'AbortError' || code === 'ABORT_ERR') {
       return { status: 0, message: redactSecrets(err.message || 'request aborted'), retryable: true };
     }
-    if (NETWORKISH.has(code)) {
+    if (CONNECT_STAGE.has(code) || NOT_DISPATCHED.has(code) || IN_FLIGHT.has(code)) {
       return { status: 0, message: redactSecrets(err.message || code), retryable: true };
     }
     return { status: 0, message: redactSecrets(err.message || 'unexpected error'), retryable: false };

@@ -40,6 +40,15 @@ describe('graphql.send_request', () => {
     expect(out.data).toBeNull();
   });
 
+  it('rejects an endpoint without a scheme as invalid input instead of retrying it', async () => {
+    await expect(
+      sendRequest.execute({
+        auth: createDirectAuth({ type: 'none' }, { type: 'none' }),
+        props: { url: 'example.com/graphql', query: '{ x }' },
+      }),
+    ).rejects.toMatchObject({ code: 'invalid_input', retryable: false });
+  });
+
   it('is refused by the transport before reaching a private endpoint (SSRF guard)', async () => {
     const server = await startLoopbackServer();
     try {

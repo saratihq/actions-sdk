@@ -50,6 +50,19 @@ describe('http.send_request', () => {
     expect(out.status).toBe(404);
   });
 
+  it('rejects a URL without a scheme as invalid input instead of retrying it', async () => {
+    await expect(
+      sendRequest.execute({
+        auth: createDirectAuth({ type: 'none' }, { type: 'none' }),
+        props: { method: 'POST', url: 'example.com/api' },
+      }),
+    ).rejects.toMatchObject({
+      code: 'invalid_input',
+      retryable: false,
+      message: 'invalid URL: "example.com/api"',
+    });
+  });
+
   it('is refused by the transport before reaching a private address (SSRF guard)', async () => {
     const server = await startLoopbackServer();
     try {
