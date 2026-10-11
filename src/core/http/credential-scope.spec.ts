@@ -1,5 +1,7 @@
 import type { CredentialOrigins } from '../auth';
+import { defineAction } from '../action';
 import { createAuth } from '../auth-factories';
+import { defineTrigger } from '../trigger';
 import { FakeTransport } from '../../testing/fakes';
 import { HttpClient } from './client';
 
@@ -76,6 +78,30 @@ describe('credential scope — which URLs a scheme lets its credential ride', ()
     'rejects the malformed origin %s when the handle is built',
     (origin) => {
       expect(() => scopedTo([origin])).toThrow(expect.objectContaining({ code: 'invalid_input' }));
+    },
+  );
+
+  it.each(['https://api.example.com/', 'https://API.example.com', 'https://api.example.com/v1'])(
+    'rejects the origin %s when the action or trigger is defined, not when it first runs',
+    (origin) => {
+      const auth = { type: 'oauth2', origins: [origin] } as const;
+      const run = () => Promise.resolve(null);
+      expect(() =>
+        defineAction({ type: 'demo.read', name: 'Read', description: 'd', auth, props: {}, run }),
+      ).toThrow(expect.objectContaining({ code: 'invalid_input' }));
+      expect(() =>
+        defineTrigger({
+          type: 'demo.poll',
+          strategy: 'polling',
+          name: 'Poll',
+          description: 'd',
+          auth,
+          props: {},
+          sampleData: null,
+          poll: () => Promise.resolve([]),
+          dedupeKey: () => 'k',
+        }),
+      ).toThrow(expect.objectContaining({ code: 'invalid_input' }));
     },
   );
 

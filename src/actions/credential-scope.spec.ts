@@ -213,28 +213,67 @@ describe('instance URLs on each vendor-documented cloud domain are reached; any 
     return { urls, fetchImpl };
   };
 
+  const GATEWAY = 'https://api.atlassian.com';
+  const GOV_GATEWAY = 'https://api.atlassian-us-gov-mod.com';
+
   it.each([
-    ['https://acme.atlassian.net', true],
-    ['https://acme.jira.com', true],
-    ['https://acme.atlassian-us-gov-mod.net/jira', true],
-    ['http://acme.atlassian.net', false],
-    ['https://acme.atlassian.net.evil.com', false],
-    ['https://jira.acme-corp.example', false],
-  ] as const)('jira instanceUrl %s → reached: %s', async (instanceUrl, reached) => {
+    ['https://acme.atlassian.net', GATEWAY, 'https://acme.atlassian.net'],
+    ['https://acme.jira.com', GATEWAY, 'https://acme.jira.com'],
+    ['https://acme.atlassian-us-gov-mod.net', GOV_GATEWAY, 'https://acme.atlassian-us-gov-mod.net'],
+    ['https://acme.atlassian-us-gov-mod.net/jira', GOV_GATEWAY, 'https://acme.atlassian-us-gov-mod.net'],
+    ['https://acme.atlassian.net/browse/ENG-1', GATEWAY, 'https://acme.atlassian.net'],
+    ['http://acme.atlassian.net', GATEWAY, null],
+    ['https://acme.atlassian.net.evil.com', GATEWAY, null],
+    ['https://jira.acme-corp.example', GATEWAY, null],
+  ] as const)('jira instanceUrl %s probes %s, then reaches %s', async (instanceUrl, gateway, site) => {
     const { urls, fetchImpl } = recorder((url) =>
-      url.hostname === 'api.atlassian.com' ? fakeResponse(401, '') : json({ id: '1', key: 'ENG-1' }),
+      url.pathname === '/oauth/token/accessible-resources'
+        ? fakeResponse(401, '')
+        : json({ id: '1', key: 'ENG-1' }),
     );
     const run = getIssue.execute({
       auth: createDirectAuth(jiraAuth, basic, { fetchImpl }),
       props: { instanceUrl, issueIdOrKey: 'ENG-1' },
     });
-    if (reached) {
+    if (site) {
       await expect(run).resolves.toMatchObject({ key: 'ENG-1' });
-      expect(urls[1]).toBe(`${instanceUrl}/rest/api/3/issue/ENG-1`);
+      expect(urls).toEqual([`${gateway}/oauth/token/accessible-resources`, `${site}/rest/api/3/issue/ENG-1`]);
     } else {
       await expect(run).rejects.toMatchObject({ code: 'credential_scope' });
-      expect(urls.map((u) => new URL(u).hostname)).toEqual(['api.atlassian.com']);
+      expect(urls).toEqual([`${gateway}/oauth/token/accessible-resources`]);
     }
+  });
+
+  it('a Government Cloud OAuth token resolves its site through the Government Cloud gateway', async () => {
+    const { urls, fetchImpl } = recorder((url) =>
+      url.pathname === '/oauth/token/accessible-resources'
+        ? json([{ id: 'cloud-1', url: 'https://acme.atlassian-us-gov-mod.net' }])
+        : json({ id: '1', key: 'ENG-1' }),
+    );
+    await getIssue.execute({
+      auth: createDirectAuth(jiraAuth, basic, { fetchImpl }),
+      props: { instanceUrl: 'https://acme.atlassian-us-gov-mod.net', issueIdOrKey: 'ENG-1' },
+    });
+    expect(urls).toEqual([
+      `${GOV_GATEWAY}/oauth/token/accessible-resources`,
+      `${GOV_GATEWAY}/ex/jira/cloud-1/rest/api/3/issue/ENG-1`,
+    ]);
+  });
+
+  it('a Jira site that answers a web page instead of JSON fails rather than returning the page', async () => {
+    const { fetchImpl } = recorder((url) =>
+      url.pathname === '/oauth/token/accessible-resources'
+        ? fakeResponse(401, '')
+        : fakeResponse(200, '<!doctype html><title>Jira</title>', {
+            'content-type': 'text/html;charset=UTF-8',
+          }),
+    );
+    await expect(
+      getIssue.execute({
+        auth: createDirectAuth(jiraAuth, basic, { fetchImpl }),
+        props: { instanceUrl: 'https://acme.atlassian.net', issueIdOrKey: 'ENG-1' },
+      }),
+    ).rejects.toMatchObject({ code: 'provider_error', message: expect.stringContaining('text/html') });
   });
 
   it.each([

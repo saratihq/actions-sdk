@@ -71,10 +71,13 @@ export class CredentialScope {
   }
 }
 
-/** Wrap `transport` so a request outside the scheme's origins fails before it is sent, and the checked URL is the one sent. */
-export function scopeCredential(scheme: AuthScheme, transport: Transport): Transport {
-  if (scheme.type === 'none') return transport;
-  const scope = new CredentialScope(scheme);
+/** The scope a scheme's credential is held to, or `null` for a credential-free scheme; throws on a malformed origin. */
+export function credentialScope(scheme: AuthScheme): CredentialScope | null {
+  return scheme.type === 'none' ? null : new CredentialScope(scheme);
+}
+
+function scoped(scope: CredentialScope | null, transport: Transport): Transport {
+  if (!scope) return transport;
   return {
     kind: transport.kind,
     async send(request: NormalizedRequest): Promise<NormalizedResponse> {
@@ -83,8 +86,12 @@ export function scopeCredential(scheme: AuthScheme, transport: Transport): Trans
   };
 }
 
-/** Re-wrap `auth` so whatever transport it carries only reaches the origins `scheme` declares. */
-export function scopeHandle(scheme: AuthScheme, auth: AuthHandle): AuthHandle {
-  if (scheme.type === 'none') return auth;
-  return createAuthHandle(auth.scheme, scopeCredential(scheme, transportOf(auth)));
+/** Wrap `transport` so a request outside the scheme's origins fails before it is sent, and the checked URL is the one sent. */
+export function scopeCredential(scheme: AuthScheme, transport: Transport): Transport {
+  return scoped(credentialScope(scheme), transport);
+}
+
+/** Re-wrap `auth` so whatever transport it carries only reaches the origins `scope` allows. */
+export function scopeHandle(scope: CredentialScope | null, auth: AuthHandle): AuthHandle {
+  return scope ? createAuthHandle(auth.scheme, scoped(scope, transportOf(auth))) : auth;
 }

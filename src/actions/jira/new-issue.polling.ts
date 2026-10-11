@@ -1,6 +1,6 @@
 import { defineTrigger } from '../../core/trigger';
 import { shortText } from '../../core/props';
-import { instanceUrlProp, jiraAuth, resolveJiraBase } from './common';
+import { instanceUrlProp, jiraAuth, jiraJson, resolveJiraBase } from './common';
 
 /** Polling trigger — fires for each newly created Jira issue (newest-first JQL head, deduped by id). */
 export const NEW_ISSUE_TYPE = 'jira.new_issue';
@@ -83,7 +83,7 @@ export const newIssue = defineTrigger({
       query: { jql, fields: ISSUE_FIELDS, maxResults: POLL_WINDOW },
     });
     const events: JiraIssueEvent[] = [];
-    for (const issue of res.data.issues ?? []) {
+    for (const issue of jiraJson(res).issues ?? []) {
       if (typeof issue.id !== 'string') continue;
       const f = issue.fields ?? {};
       events.push({

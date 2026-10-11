@@ -2,7 +2,7 @@ import type { AuthHandle, AuthScheme } from './auth';
 import { type ManifestEntry, toManifestEntry } from './catalog';
 import { ActionError } from './errors';
 import { HttpClient } from './http/client';
-import { scopeHandle } from './http/credential-scope';
+import { type CredentialScope, credentialScope, scopeHandle } from './http/credential-scope';
 import type { JsonValue } from './http/types';
 import { parseProps, type PropsSchema, type PropsValue } from './props';
 
@@ -188,12 +188,16 @@ export function defineTrigger<TProps extends PropsSchema, TItem>(
       props: def.props,
     });
 
-  return def.strategy === 'polling' ? buildPollingTrigger(def, manifest) : buildWebhookTrigger(def, manifest);
+  const scope = credentialScope(def.auth);
+  return def.strategy === 'polling'
+    ? buildPollingTrigger(def, manifest, scope)
+    : buildWebhookTrigger(def, manifest, scope);
 }
 
 function buildPollingTrigger<TProps extends PropsSchema, TItem>(
   def: PollingTriggerDefinition<TProps, TItem>,
   manifest: () => ManifestEntry,
+  scope: CredentialScope | null,
 ): PollingTrigger<TProps, TItem> {
   return {
     ...def,
@@ -202,7 +206,7 @@ function buildPollingTrigger<TProps extends PropsSchema, TItem>(
       const http = input.http ?? new HttpClient();
       const lastPolledAt = await input.store.get<string>('lastPolledAt');
       const items = await def.poll({
-        auth: scopeHandle(def.auth, input.auth),
+        auth: scopeHandle(scope, input.auth),
         props,
         http,
         store: input.store,
@@ -232,6 +236,7 @@ function buildPollingTrigger<TProps extends PropsSchema, TItem>(
 function buildWebhookTrigger<TProps extends PropsSchema, TItem>(
   def: WebhookTriggerDefinition<TProps, TItem>,
   manifest: () => ManifestEntry,
+  scope: CredentialScope | null,
 ): WebhookTrigger<TProps, TItem> {
   return {
     ...def,
@@ -240,7 +245,7 @@ function buildWebhookTrigger<TProps extends PropsSchema, TItem>(
       const props = parseProps(def.props, input.props);
       const http = input.http ?? new HttpClient();
       const registration = await def.onEnable({
-        auth: scopeHandle(def.auth, input.auth),
+        auth: scopeHandle(scope, input.auth),
         props,
         http,
         store: input.store,
@@ -254,7 +259,7 @@ function buildWebhookTrigger<TProps extends PropsSchema, TItem>(
       const props = parseProps(def.props, input.props);
       const http = input.http ?? new HttpClient();
       await def.onDisable({
-        auth: scopeHandle(def.auth, input.auth),
+        auth: scopeHandle(scope, input.auth),
         props,
         http,
         store: input.store,
@@ -281,7 +286,7 @@ function buildWebhookTrigger<TProps extends PropsSchema, TItem>(
       const props = parseProps(def.props, input.props);
       const http = input.http ?? new HttpClient();
       const events = await def.onRequest({
-        auth: scopeHandle(def.auth, input.auth),
+        auth: scopeHandle(scope, input.auth),
         props,
         http,
         store: input.store,

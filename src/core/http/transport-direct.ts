@@ -2,7 +2,7 @@ import { isNativeError } from 'node:util/types';
 
 import type { AuthScheme, DirectCredential } from '../auth';
 import { ActionError, transportFailure } from '../errors';
-import { CredentialScope } from './credential-scope';
+import { type CredentialScope, credentialScope } from './credential-scope';
 import { encodeForm } from './form';
 import { guardedFetch } from './guarded-fetch';
 import { encodeMultipart } from './multipart';
@@ -13,6 +13,7 @@ import {
   isMultipartBody,
   type NormalizedRequest,
   type NormalizedResponse,
+  type RequestBody,
   type Transport,
 } from './types';
 
@@ -35,18 +36,16 @@ export class DirectTransport implements Transport {
     this.scheme = options.scheme;
     this.credential = options.credential;
     this.fetchImpl = options.fetchImpl ?? guardedFetch;
-    this.scope =
-      options.scheme.type === 'none' || options.credential.type === 'none'
-        ? null
-        : new CredentialScope(options.scheme);
+    this.scope = credentialScope(options.scheme);
   }
 
   async send(request: NormalizedRequest): Promise<NormalizedResponse> {
+    const bodyBefore = this.scheme.type === 'custom' ? bodySnapshot(request.body) : undefined;
     const prepared = this.applyAuth(request);
     if (this.scope) prepared.url = this.scope.admit(prepared.url).href;
     const credentialHeaders = changedHeaders(request.headers, prepared.headers);
     const credentialParams = changedParams(request.url, prepared.url);
-    const credentialBody = this.scheme.type === 'custom' && prepared.body !== undefined;
+    const credentialBody = this.scheme.type === 'custom' && bodySnapshot(prepared.body) !== bodyBefore;
     const wireBody = this.encodeBody(prepared);
     const res = await this.fetchImpl(prepared.url, {
       method: prepared.method,
@@ -142,6 +141,17 @@ async function readBody<T>(url: string, read: () => Promise<T>): Promise<T> {
     const reason = isNativeError(cause) ? cause : isNativeError(err) ? err : new Error(String(err));
     throw transportFailure(new URL(url).origin, reason, 'response');
   }
+}
+
+// A file part is summarised by its size: a credential rides a field, never a file's bytes.
+function bodySnapshot(body: RequestBody | undefined): string | undefined {
+  if (body === undefined) return undefined;
+  if (isMultipartBody(body)) {
+    return JSON.stringify(
+      body.parts.map((part) => (part.type === 'file' ? { ...part, data: part.data.byteLength } : part)),
+    );
+  }
+  return JSON.stringify(isFormBody(body) ? body.fields : body);
 }
 
 function changedHeaders(before: Record<string, string>, after: Record<string, string>): string[] {

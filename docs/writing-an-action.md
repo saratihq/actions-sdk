@@ -80,14 +80,15 @@ user input (a Zendesk subdomain, a Salesforce instance). List every origin the a
 hosts a provider hands back (Slack's `files.slack.com`). A request to any other origin — a typo, a
 provider-supplied next-page URL, an attacker-chosen host — fails with `credential_scope` before it
 is sent. On a direct connection a redirect never carries the credential to another origin, and a
-`custom` scheme's body is never replayed to one. When user input becomes part of a hostname, pass it
+body a `custom` scheme changed is never replayed to one. When user input becomes part of a hostname, pass it
 through `hostLabel` so a value like `evil.com#` can't escape the template.
 
 ### Upgrading to 0.2
 
 `origins` is now required on every `oauth2`, `apiKey`, `basic` and `custom` scheme. Its type is a
-non-empty tuple, so write the list inline (or `as const`); a plain `string[]` won't type-check. A
-scheme without it fails with `invalid_input` when its handle is built. Requests outside the list
+non-empty tuple, so write the list inline (or `as const`); a plain `string[]` won't type-check. Each
+entry is an origin exactly as a URL reports it — lower case, no path, no trailing slash. A missing or
+malformed list fails with `invalid_input` when the action or trigger is defined. Requests outside the list
 fail with the new `credential_scope` error code. An action enforces its own `origins` whatever handle
 it is given, so a spec that stubs the transport still fails on a URL outside them.
 

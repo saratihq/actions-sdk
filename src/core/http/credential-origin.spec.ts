@@ -208,6 +208,65 @@ describe('a credential never reaches a foreign origin — real sockets', () => {
     expect(foreign.hits).toHaveLength(0);
   });
 
+  it('scopes a custom scheme even with no credential, since apply can still attach a secret it holds', async () => {
+    const auth = createDirectAuth(
+      {
+        type: 'custom',
+        origins: [providerOrigin],
+        apply: (req) => {
+          req.headers['x-signature'] = SECRET;
+        },
+      },
+      { type: 'none' },
+    );
+    await expect(
+      withAllowedHosts('127.0.0.1', () => http.get(`${foreignOrigin}/steal`, { auth })),
+    ).rejects.toMatchObject({ code: 'credential_scope' });
+    expect(foreign.hits).toHaveLength(0);
+  });
+
+  it.each([301, 302, 307, 308])(
+    'replays a body a header-signing custom scheme left untouched on a %i to another origin, without the signature',
+    async (status) => {
+      const auth = createDirectAuth(
+        {
+          type: 'custom',
+          origins: [providerOrigin],
+          apply: (req, cred) => {
+            if (cred.type === 'apiKey') req.headers['x-signature'] = cred.value;
+          },
+        },
+        { type: 'apiKey', value: SECRET },
+      );
+      const res = await withAllowedHosts('127.0.0.1', () =>
+        http.put(redirectUrl(`${foreignOrigin}/landing`, status), { auth, body: { a: 1 } }),
+      );
+      expect(res.data).toBe('foreign');
+      expect(foreign.hits.map((h) => [h.method, h.body, h.headers['x-signature']])).toEqual([
+        ['PUT', '{"a":1}', undefined],
+      ]);
+    },
+  );
+
+  it('treats a body a custom scheme changed in place as credential-bearing', async () => {
+    const auth = createDirectAuth(
+      {
+        type: 'custom',
+        origins: [providerOrigin],
+        apply: (req, cred) => {
+          if (cred.type === 'apiKey') (req.body as Record<string, unknown>).api_key = cred.value;
+        },
+      },
+      { type: 'apiKey', value: SECRET },
+    );
+    await expect(
+      withAllowedHosts('127.0.0.1', () =>
+        http.put(redirectUrl(`${foreignOrigin}/landing`, 307), { auth, body: { a: 1 } }),
+      ),
+    ).rejects.toMatchObject({ code: 'credential_scope' });
+    expect(foreign.hits).toHaveLength(0);
+  });
+
   describe('a custom scheme that signs the body', () => {
     const bodyAuth = () =>
       createDirectAuth(

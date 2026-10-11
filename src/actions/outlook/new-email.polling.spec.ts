@@ -38,20 +38,18 @@ const okResponse = (data: unknown): NormalizedResponse => ({ status: 200, header
 const readableQuery = (request: NormalizedRequest): string =>
   decodeURIComponent(request.url).replace(/\+/g, ' ');
 
-/** A Graph `/me/messages` stand-in: ascending by receivedDateTime, honouring `ge` and paging by `$skiptoken`. */
-function fakeGraph(count: number) {
-  const timeOf = (i: number): string =>
-    new Date(Date.UTC(2026, 9, 1, 1, 0, 0) + i * 1000).toISOString().replace('.000', '');
-  const messages = Array.from({ length: count }, (_, i) => ({ id: `msg-${i}`, receivedDateTime: timeOf(i) }));
+/** A Graph `/me/messages` stand-in: ascending by receivedDateTime (whole seconds), honouring `ge` and paging by `$skiptoken`. */
+function fakeGraph(times: string[]) {
+  const messages = times.map((receivedDateTime, i) => ({ id: `msg-${i}`, receivedDateTime }));
   const transport = new FakeTransport((request) => {
     const url = new URL(request.url);
+    if (url.searchParams.get('$skiptoken') === 'EXPIRED')
+      return { status: 400, headers: {}, data: { error: 'bad token' } };
     const top = Number(url.searchParams.get('$top') ?? 100);
     const skip = url.searchParams.get('$skiptoken');
-    const since = url.searchParams.get('$filter')?.replace('receivedDateTime ge ', '') ?? '';
+    const since = Date.parse(url.searchParams.get('$filter')?.replace('receivedDateTime ge ', '') ?? '');
     const start =
-      skip !== null
-        ? Number(skip)
-        : messages.findIndex((m) => Date.parse(m.receivedDateTime) >= Date.parse(since));
+      skip !== null ? Number(skip) : messages.findIndex((m) => Date.parse(m.receivedDateTime) >= since);
     const from = start === -1 ? messages.length : start;
     const value = messages.slice(from, from + top);
     const next =
@@ -60,11 +58,41 @@ function fakeGraph(count: number) {
         : {};
     return okResponse({ value, ...next });
   });
-  return Object.assign(transport, {
-    ids: messages.map((m) => m.id),
-    newest: timeOf(count - 1),
-    timeOf,
-  });
+  return Object.assign(transport, { ids: messages.map((m) => m.id), newest: times[times.length - 1]! });
+}
+
+/** `count` whole-second timestamps spread over `spanSeconds` from 01:00:00, as Graph reports them. */
+function burst(count: number, spanSeconds: number, startSecond = 0): string[] {
+  const base = Date.UTC(2026, 9, 1, 1, 0, 0);
+  return Array.from({ length: count }, (_, i) =>
+    new Date(base + (startSecond + Math.floor((i * spanSeconds) / count)) * 1000)
+      .toISOString()
+      .replace('.000', ''),
+  );
+}
+
+/** Poll `times` times, recording what each poll emitted, how many Graph calls it made and the cursor after it. */
+async function pollRepeatedly(graph: ReturnType<typeof fakeGraph>, times: number) {
+  const store = new MemoryStore();
+  await store.set('lastPolledAt', '2026-10-01T00:00:00.000Z');
+  const polls: Array<{ events: string[]; calls: number; cursor: string | undefined; first: URL }> = [];
+  for (let i = 0; i < times; i += 1) {
+    const before = graph.requests.length;
+    const { events } = await newEmail.runPoll({ auth: stubAuth(graph), props: {}, store });
+    polls.push({
+      events: events.map((e) => e.id),
+      calls: graph.requests.length - before,
+      cursor: await store.get<string>('cursor'),
+      first: new URL(graph.requests[before]!.url),
+    });
+  }
+  const cursors = polls.map((p) => Date.parse(p.cursor ?? ''));
+  return {
+    delivered: polls.flatMap((p) => p.events),
+    polls,
+    neverBackwards: cursors.every((c, i) => i === 0 || c >= cursors[i - 1]!),
+    store,
+  };
 }
 
 /** Seed a watermark so the poll runs its real (non-baseline) path. */
@@ -142,57 +170,82 @@ describe('outlook.new_email polling trigger', () => {
     expect(events.map((e) => e.id)).toEqual(['AAMkAGUAAAwTW09AAA=', 'AAMkAGUAAAwTW10BBB=']);
   });
 
-  it('drains a backlog larger than one poll across polls, each message exactly once, never wedging', async () => {
-    const graph = fakeGraph(3000);
-    const store = new MemoryStore();
-    await store.set('lastPolledAt', '2026-10-01T00:00:00.000Z');
-    const delivered: string[] = [];
-    let polls = 0;
-    for (; polls < 20; polls += 1) {
-      const { events } = await newEmail.runPoll({ auth: stubAuth(graph), props: {}, store });
-      if (events.length === 0) break;
-      delivered.push(...events.map((e) => e.id));
-    }
+  it('drains a 3,000-message backlog in 500-message polls, each message exactly once, never wedging', async () => {
+    const graph = fakeGraph(burst(3000, 3000));
+    const { delivered, polls, neverBackwards, store } = await pollRepeatedly(graph, 8);
     expect(delivered).toEqual(graph.ids);
-    expect(polls).toBe(7);
+    expect(polls.map((p) => p.events.length)).toEqual([500, 500, 500, 500, 500, 500, 0, 0]);
+    expect(neverBackwards).toBe(true);
     expect(await store.get('cursor')).toBe(graph.newest);
-    expect(await store.get('draining')).toBe(false);
+    expect(await store.get('resume')).toBeNull();
   });
 
-  it('resumes a capped poll exactly at its cursor, then widens by the overlap once caught up', async () => {
-    const graph = fakeGraph(700);
-    const store = new MemoryStore();
-    await store.set('lastPolledAt', '2026-10-01T00:00:00.000Z');
-    await newEmail.runPoll({ auth: stubAuth(graph), props: {}, store });
-    await newEmail.runPoll({ auth: stubAuth(graph), props: {}, store });
-    await newEmail.runPoll({ auth: stubAuth(graph), props: {}, store });
-    const filters = graph.requests
-      .filter((r) => !r.url.includes('$skiptoken'))
-      .map((r) => new URL(r.url).searchParams.get('$filter'));
-    expect(filters).toEqual([
+  it('delivers 1,500 messages that arrived within 115 s exactly once over 12 polls, then stays quiet', async () => {
+    const graph = fakeGraph(burst(1500, 115));
+    const { delivered, polls, neverBackwards } = await pollRepeatedly(graph, 12);
+    expect(delivered).toEqual(graph.ids);
+    expect(neverBackwards).toBe(true);
+    expect(polls.slice(3).every((p) => p.events.length === 0 && p.calls === 1)).toBe(true);
+  });
+
+  it('delivers 600 messages sharing one second, and a later one, all 601 exactly once', async () => {
+    const graph = fakeGraph([...burst(600, 1, 5), ...burst(1, 1, 65)]);
+    const { delivered, neverBackwards } = await pollRepeatedly(graph, 6);
+    expect(delivered).toEqual(graph.ids);
+    expect(neverBackwards).toBe(true);
+  });
+
+  it('after 600 messages in 60 s, a quiet mailbox costs one Graph call per poll and emits nothing', async () => {
+    const graph = fakeGraph(burst(600, 60));
+    const { delivered, polls, neverBackwards } = await pollRepeatedly(graph, 8);
+    expect(delivered).toEqual(graph.ids);
+    expect(neverBackwards).toBe(true);
+    expect(polls.slice(2).map((p) => [p.events.length, p.calls])).toEqual(Array(6).fill([0, 1]));
+  });
+
+  it('resumes a capped poll from its saved next link, then queries from the cursor once caught up', async () => {
+    const graph = fakeGraph(burst(700, 700));
+    const { polls } = await pollRepeatedly(graph, 3);
+    expect(
+      polls.map(
+        (p) => p.first.searchParams.get('$filter') ?? `resume ${p.first.searchParams.get('$skiptoken')}`,
+      ),
+    ).toEqual([
       'receivedDateTime ge 2026-09-30T23:58:00.000Z',
-      `receivedDateTime ge ${graph.timeOf(499)}`,
-      `receivedDateTime ge ${new Date(Date.parse(graph.newest) - 120_000).toISOString()}`,
+      'resume 500',
+      `receivedDateTime ge ${new Date(Date.parse(graph.newest)).toISOString()}`,
     ]);
   });
 
-  it('bounds a runaway @odata.nextLink per poll and still moves the cursor', async () => {
-    const page = Array.from({ length: 100 }, (_, i) => ({
-      id: `m${i}`,
-      receivedDateTime: new Date(Date.UTC(2026, 9, 1, 0, 0, i)).toISOString().replace('.000', ''),
-    }));
+  it('stops a runaway @odata.nextLink that points at itself, keeps the cursor moving and saves no resume link', async () => {
+    const page = burst(100, 100);
+    const runaway = 'https://graph.microsoft.com/v1.0/me/messages?$skiptoken=AGAIN';
     const transport = new FakeTransport(() =>
       okResponse({
-        value: page,
-        '@odata.nextLink': 'https://graph.microsoft.com/v1.0/me/messages?$skiptoken=AGAIN',
+        value: page.map((t, i) => ({ id: `m${i}`, receivedDateTime: t })),
+        '@odata.nextLink': runaway,
       }),
     );
     const store = new MemoryStore();
     await withWatermark(store);
     const { events } = await newEmail.runPoll({ auth: stubAuth(transport), props: {}, store });
-    expect(transport.requests).toHaveLength(5);
+    expect(transport.requests.map((r) => r.url.includes('AGAIN'))).toEqual([false, true]);
     expect(events).toHaveLength(100);
-    expect(await store.get('cursor')).toBe(page[99]!.receivedDateTime);
+    expect(await store.get('cursor')).toBe(page[99]);
+    expect(await store.get('resume')).toBeNull();
+  });
+
+  it('a saved next link Graph no longer honours costs one poll, then the cursor query delivers the rest', async () => {
+    const graph = fakeGraph(burst(700, 700));
+    const store = new MemoryStore();
+    await store.set('lastPolledAt', '2026-10-01T00:00:00.000Z');
+    const first = await newEmail.runPoll({ auth: stubAuth(graph), props: {}, store });
+    await store.set('resume', 'https://graph.microsoft.com/v1.0/me/messages?$skiptoken=EXPIRED');
+    await expect(newEmail.runPoll({ auth: stubAuth(graph), props: {}, store })).rejects.toMatchObject({
+      status: 400,
+    });
+    const third = await newEmail.runPoll({ auth: stubAuth(graph), props: {}, store });
+    expect([...first.events, ...third.events].map((e) => e.id)).toEqual(graph.ids);
   });
 
   it('dedupes the id re-listed inside the overlap window across polls', async () => {

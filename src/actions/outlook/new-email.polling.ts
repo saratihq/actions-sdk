@@ -1,4 +1,5 @@
-import { paginate } from '../../core/http/pagination';
+import type { HttpResponse } from '../../core/http/client';
+import { appendQuery } from '../../core/http/types';
 import type { PropsSchema } from '../../core/props';
 import { defineTrigger } from '../../core/trigger';
 import { GRAPH_ME_BASE, MESSAGE_SELECT, odataNextLink, type OutlookMessage, outlookAuth } from './common';
@@ -8,10 +9,12 @@ export const OUTLOOK_NEW_EMAIL_TYPE = 'outlook.new_email';
 
 /** Page size for the list call; Graph allows up to 1000. */
 const TOP = 100;
-/** Messages emitted per poll — half the trigger's dedupe memory; a larger backlog drains over later polls. */
+/** Messages newer than the cursor emitted per poll — half the trigger's dedupe memory; a larger backlog drains over later polls. */
 const MAX_PER_POLL = 500;
-/** Overlap on the watermark so a boundary message is never skipped; id-dedupe suppresses the re-list. */
-const OVERLAP_SECONDS = 120;
+/** Pages read per poll; a poll that stops early saves its next link and the next poll resumes there. */
+const MAX_PAGES_PER_POLL = 20;
+/** Messages can become visible after their receivedDateTime; re-list this far behind the previous poll, id-dedupe drops repeats. */
+const OVERLAP_MS = 120_000;
 
 /** A normalised "new email" event — trimmed to the fields workflows use. */
 export interface OutlookNewEmailEvent {
@@ -83,38 +86,50 @@ export const newEmail = defineTrigger({
     if (!lastPolledAt) return [];
 
     const cursor = (await store.get<string>('cursor')) ?? lastPolledAt;
-    const draining = (await store.get<boolean>('draining')) === true;
+    const reached = Date.parse(cursor);
+    // Cleared before use, so a link Graph no longer honours costs one failed poll, then the cursor query takes over.
+    const resume = await store.get<string | null>('resume');
+    await store.set('resume', null);
+
     // $filter and $orderby must share receivedDateTime in the same order, or Graph 400s with InefficientFilter.
-    const messages = await paginate<OutlookMessage>({
-      http,
-      auth,
-      url: `${GRAPH_ME_BASE}/messages`,
-      query: {
+    let url: string | null =
+      resume ??
+      appendQuery(`${GRAPH_ME_BASE}/messages`, {
         $select: MESSAGE_SELECT,
         $orderby: 'receivedDateTime asc',
         $top: TOP,
-        $filter: `receivedDateTime ge ${draining ? cursor : sinceWithOverlap(cursor)}`,
-      },
-      extractItems: (res) => (res.data as MessagesListResponse).value ?? [],
-      nextPage: odataNextLink,
-      maxItems: MAX_PER_POLL,
-    });
+        $filter: `receivedDateTime ge ${lowerBound(reached, lastPolledAt)}`,
+      });
+    const messages: OutlookMessage[] = [];
+    let fresh = 0;
+    for (let page = 0; url && page < MAX_PAGES_PER_POLL && fresh < MAX_PER_POLL; page += 1) {
+      const res: HttpResponse<MessagesListResponse> = await http.get<MessagesListResponse>(url, { auth });
+      for (const message of res.data.value ?? []) {
+        messages.push(message);
+        if (Date.parse(message.receivedDateTime ?? '') > reached) fresh += 1;
+      }
+      const next = odataNextLink(res, url);
+      url = next === url ? null : next;
+    }
+    if (url) await store.set('resume', url);
 
     const newest = messages.reduce<string | undefined>(
-      (max, m) => (m.receivedDateTime && (!max || m.receivedDateTime > max) ? m.receivedDateTime : max),
+      (max, m) =>
+        m.receivedDateTime && Date.parse(m.receivedDateTime) > Date.parse(max ?? cursor)
+          ? m.receivedDateTime
+          : max,
       undefined,
     );
     if (newest) await store.set('cursor', newest);
-    await store.set('draining', messages.length >= MAX_PER_POLL);
     return messages.map(toEvent).filter((event): event is OutlookNewEmailEvent => event !== null);
   },
   /** Dedupe on the immutable message id. */
   dedupeKey: (event): string => event.id,
 });
 
-/** The `receivedDateTime ge` lower bound: the cursor less the overlap, as ISO 8601 UTC. */
-function sinceWithOverlap(cursor: string): string {
-  const ms = new Date(cursor).getTime();
-  const base = Number.isNaN(ms) ? Date.now() : ms;
-  return new Date(base - OVERLAP_SECONDS * 1000).toISOString();
+/** The `receivedDateTime ge` lower bound: the cursor, or the overlap behind the previous poll if that is earlier. */
+function lowerBound(reached: number, lastPolledAt: string): string {
+  const polled = Date.parse(lastPolledAt);
+  const overlapStart = (Number.isNaN(polled) ? Date.now() : polled) - OVERLAP_MS;
+  return new Date(Number.isNaN(reached) ? overlapStart : Math.min(reached, overlapStart)).toISOString();
 }

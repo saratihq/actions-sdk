@@ -2,7 +2,7 @@ import type { AuthHandle, AuthScheme } from './auth';
 import { type ManifestEntry, toManifestEntry } from './catalog';
 import { ActionError, normalizeError } from './errors';
 import { HttpClient } from './http/client';
-import { scopeHandle } from './http/credential-scope';
+import { credentialScope, scopeHandle } from './http/credential-scope';
 import { type DropdownResult, parseProps, type PropsSchema, type PropsValue, resolveOptions } from './props';
 
 /** Public action namespace: `<slug>.<action>`, both `[a-z][a-z0-9_]*`. */
@@ -57,12 +57,13 @@ export function defineAction<TProps extends PropsSchema, TOutput>(
     });
   }
 
+  const scope = credentialScope(def.auth);
   const action: Action<TProps, TOutput> = {
     ...def,
     async execute(input: ExecuteInput): Promise<TOutput> {
       const props = parseProps(def.props, input.props);
       const http = input.http ?? new HttpClient();
-      const auth = scopeHandle(def.auth, input.auth);
+      const auth = scopeHandle(scope, input.auth);
       try {
         return await def.run({ auth, props, http });
       } catch (err) {
@@ -83,7 +84,7 @@ export function defineAction<TProps extends PropsSchema, TOutput>(
       }
       const http = ctx.http ?? new HttpClient();
       return resolveOptions(schema, {
-        ...(ctx.auth ? { auth: scopeHandle(def.auth, ctx.auth) } : {}),
+        ...(ctx.auth ? { auth: scopeHandle(scope, ctx.auth) } : {}),
         http,
         ...(ctx.search ? { search: ctx.search } : {}),
       });
