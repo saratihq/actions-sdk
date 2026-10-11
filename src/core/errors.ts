@@ -94,7 +94,7 @@ const INVALID_REQUEST = new Set([
 const LOCAL_ARGUMENT = /^ERR_INVALID_ARG_/;
 const TLS_HANDSHAKE = /^ERR_(TLS|SSL)_|CERT|SIGNATURE/;
 const CERTIFICATE = /CERT|SIGNATURE/;
-const BODY_DECODE = /^Z_|^ERR_BROTLI|^ERR_ZLIB/;
+const BODY_DECODE = /^Z_|^ERR__|^ERR_BROTLI|^ERR_ZLIB|^ZSTD_error_/;
 
 function codeOf(err: unknown): string {
   const code = (err as { code?: unknown } | null)?.code;
@@ -117,13 +117,10 @@ export function failureReason(err: unknown): string {
 function neverSent(err: unknown): boolean {
   const inner = nested(err);
   if (inner.length > 0) return inner.every(neverSent);
-  const code = codeOf(err);
   const syscall = (err as { syscall?: unknown } | null)?.syscall;
-  return (
-    NOT_DISPATCHED.has(code) ||
-    TLS_HANDSHAKE.test(code) ||
-    (CONNECT_STAGE.has(code) && typeof syscall === 'string' && CONNECT_SYSCALLS.has(syscall))
-  );
+  if (typeof syscall === 'string') return CONNECT_SYSCALLS.has(syscall);
+  const code = codeOf(err);
+  return NOT_DISPATCHED.has(code) || TLS_HANDSHAKE.test(code) || CONNECT_STAGE.has(code);
 }
 
 function failure(
@@ -134,6 +131,11 @@ function failure(
   detail: { origin: string; reason: string },
 ): ActionError {
   return new ActionError({ code, message, retryable, cause, detail });
+}
+
+/** True for a certificate that failed verification, as opposed to any other TLS failure. */
+export function isCertificateFailure(err: unknown): boolean {
+  return CERTIFICATE.test(codeOf(err));
 }
 
 /** True for a failure in the TLS handshake, before any request bytes were written. */

@@ -14,6 +14,7 @@ import { createServer as createHttpsServer } from 'node:https';
 import { type AddressInfo, createServer as createNetServer, isIP, type Socket } from 'node:net';
 import { join } from 'node:path';
 import tls from 'node:tls';
+import zlib from 'node:zlib';
 
 import { createDirectAuth } from '../auth-factories';
 import { HttpClient } from './client';
@@ -229,6 +230,11 @@ describe('guardedFetch — request shape and failures', () => {
         setTimeout(() => res.end('late'), 400);
         return;
       }
+      if (hit.url === '/br-lie' || hit.url === '/zstd-lie') {
+        res.writeHead(200, { 'content-encoding': hit.url === '/br-lie' ? 'br' : 'zstd' });
+        res.end('this is not compressed');
+        return;
+      }
       if (hit.url === '/gzip-lie') {
         res.writeHead(200, { 'content-encoding': 'gzip', 'content-type': 'text/plain' });
         res.end('this is not gzip');
@@ -312,6 +318,116 @@ describe('guardedFetch — request shape and failures', () => {
     expect((failure as Error).message).toContain(said);
     expect((failure as Error).message).not.toMatch(/sk_live_secret|Café/);
     expect(server.hits).toHaveLength(0);
+  });
+
+  it('sends a value with a leading or trailing newline trimmed, as fetch does, rather than refusing it', async () => {
+    const http = new HttpClient({ retry: { retries: 0 } });
+    await withAllowedHosts('127.0.0.1', async () => {
+      await http.get(`http://${base}/bearer`, {
+        auth: createDirectAuth({ type: 'oauth2' }, { type: 'bearer', token: 'tok_abcdefghij\n' }),
+      });
+      await http.get(`http://${base}/apikey`, {
+        auth: createDirectAuth(
+          { type: 'apiKey', in: 'header', name: 'x-k' },
+          { type: 'apiKey', value: 'sk_live_123\r\n' },
+        ),
+      });
+      await http.get(`http://${base}/header`, {
+        auth: createDirectAuth({ type: 'none' }, { type: 'none' }),
+        headers: { 'x-from-step': '\nvalue\n' },
+      });
+    });
+    expect(
+      server.hits.map((h) => [h.headers.authorization, h.headers['x-k'], h.headers['x-from-step']]),
+    ).toEqual([
+      ['Bearer tok_abcdefghij', undefined, undefined],
+      [undefined, 'sk_live_123', undefined],
+      [undefined, undefined, 'value'],
+    ]);
+  });
+
+  it('sends a non-string header value as its string form, as fetch does', async () => {
+    const headers = { 'x-page': 2, 'x-flag': true } as unknown as Record<string, string>;
+    await withAllowedHosts('127.0.0.1', () =>
+      guardedFetch(`http://${base}/n`, { headers }).then((res) => res.text()),
+    );
+    expect(server.hits[0]?.headers).toMatchObject({ 'x-page': '2', 'x-flag': 'true' });
+  });
+
+  it('drops a pasted Content-Length, so the request is framed by fetch instead of hanging', async () => {
+    await withAllowedHosts('127.0.0.1', () =>
+      guardedFetch(`http://${base}/framed`, {
+        method: 'POST',
+        headers: { 'content-length': '5', 'content-type': 'application/json' },
+        body: '{"hello":"world"}',
+      }).then((res) => res.text()),
+    );
+    expect(server.hits[0]).toMatchObject({ body: '{"hello":"world"}', headers: { 'content-length': '17' } });
+  });
+
+  it('refuses a body on a GET with a reason, before sending', async () => {
+    await withAllowedHosts('127.0.0.1', async () => {
+      await expect(
+        guardedFetch(`http://${base}/x`, { method: 'GET', body: '{"q":1}' }),
+      ).rejects.toMatchObject({
+        code: 'invalid_input',
+        message: `the request to http://${base} could not be sent: a GET request cannot carry a body`,
+      });
+    });
+    expect(server.hits).toHaveLength(0);
+  });
+
+  it("keeps fetch's own reason when it refuses a request it was given", async () => {
+    await withAllowedHosts('127.0.0.1', async () => {
+      await expect(guardedFetch(`http://${base}/x`, { method: 'GE T' })).rejects.toMatchObject({
+        code: 'invalid_input',
+        message: expect.stringContaining('GE T'),
+      });
+    });
+  });
+
+  it('retries a POST whose TLS handshake was cut short, since nothing was sent', async () => {
+    let handshakes = 0;
+    const dropper = createNetServer((socket) => {
+      socket.once('data', () => {
+        handshakes += 1;
+        socket.end();
+      });
+    });
+    await new Promise<void>((resolve) => dropper.listen(0, '127.0.0.1', resolve));
+    const { port } = dropper.address() as AddressInfo;
+    const http = new HttpClient({ retry: { baseDelayMs: 1, maxDelayMs: 1 } });
+    try {
+      await withAllowedHosts('127.0.0.1', async () => {
+        await expect(
+          http.post(`https://127.0.0.1:${port}/charge`, {
+            auth: createDirectAuth({ type: 'none' }, { type: 'none' }),
+            body: { amount: 5 },
+          }),
+        ).rejects.toMatchObject({
+          code: 'transport_unreachable',
+          message: expect.stringContaining(`could not reach https://127.0.0.1:${port}:`),
+        });
+      });
+      expect(handshakes).toBe(4);
+    } finally {
+      await new Promise((resolve) => dropper.close(resolve));
+    }
+  });
+
+  it.each([
+    '/br-lie',
+    ...(typeof (zlib as { createZstdDecompress?: unknown }).createZstdDecompress === 'function'
+      ? ['/zstd-lie']
+      : []),
+  ])('calls a %s body that will not decode a provider error and fetches it once', async (path) => {
+    const http = new HttpClient({ retry: { baseDelayMs: 1, maxDelayMs: 1 } });
+    await withAllowedHosts('127.0.0.1', async () => {
+      await expect(
+        http.get(`http://${base}${path}`, { auth: createDirectAuth({ type: 'none' }, { type: 'none' }) }),
+      ).rejects.toMatchObject({ code: 'provider_error', retryable: false });
+    });
+    expect(server.hits).toHaveLength(1);
   });
 
   it('does not resend a POST that timed out, since it may already have arrived', async () => {
@@ -438,16 +554,16 @@ describe('guardedFetch — request shape and failures', () => {
     });
   });
 
-  it.each([['https://admin:hunter2@exa mple.com/x'], ['https://admin:p@ssw0rd@exa mple.com/x']])(
-    'never echoes a password from %s, which also fails to parse',
-    async (url) => {
-      const failure = await guardedFetch(url).catch((err: unknown) => err);
-      expect(failure).toMatchObject({
-        code: 'invalid_input',
-        message: 'invalid URL: "https://exa mple.com/x"',
-      });
-    },
-  );
+  it.each([
+    ['https://admin:hunter2@exa mple.com/x', 'https://exa mple.com/x'],
+    ['https://admin:p@ssw0rd@exa mple.com/x', 'https://exa mple.com/x'],
+    ['https://admin:hunter#2@api.example.com/v1', 'https://api.example.com/v1'],
+    ['https://admin:what?now@api.example.com/v1', 'https://api.example.com/v1'],
+    ['https://admin:a/b@api.example.com/v1', 'https://api.example.com/v1'],
+  ])('never echoes a password from %s, which also fails to parse', async (url, shown) => {
+    const failure = await guardedFetch(url).catch((err: unknown) => err);
+    expect(failure).toMatchObject({ code: 'invalid_input', message: `invalid URL: "${shown}"` });
+  });
 
   it('hands back a redirect unfollowed when asked to, so a POST body is never re-sent', async () => {
     const res = await withAllowedHosts('127.0.0.1', () =>
@@ -938,6 +1054,53 @@ describe('guardedFetch — TLS to the proxy and over the tunnel', () => {
       });
     } finally {
       await proxy.close();
+    }
+  });
+
+  it('verifies an https:// proxy addressed by IP against its IP, also when it carries an allowlisted name', async () => {
+    const proxy = await startConnectProxy(plain.port, { tls: tlsFixture });
+    try {
+      const res = await withEnv(
+        env({
+          HTTP_PROXY: `https://127.0.0.1:${proxy.port}`,
+          ORCHESTR_HTTP_ALLOWED_HOSTS: 'upstream.invalid',
+        }),
+        () => guardedFetch('http://upstream.invalid/by-ip-proxy'),
+      );
+      expect(await res.text()).toBe('reached');
+      expect(proxy.tunnels).toEqual(['upstream.invalid:80']);
+    } finally {
+      await proxy.close();
+    }
+  });
+
+  it('says to check the scheme when TLS to the proxy fails for a reason other than its certificate', async () => {
+    const plainProxy = await startConnectProxy(plain.port);
+    try {
+      await withEnv(env({ HTTP_PROXY: `https://localhost:${plainProxy.port}` }), async () => {
+        await expect(guardedFetch('http://93.184.215.14/x')).rejects.toMatchObject({
+          retryable: false,
+          message: expect.stringMatching(
+            /^TLS to the egress proxy failed \(ERR_SSL_[A-Z_]+\); check whether the proxy URL should be http:\/\/ or https:\/\//,
+          ),
+        });
+      });
+    } finally {
+      await plainProxy.close();
+    }
+  });
+
+  it('says a proxy that closed on a plaintext CONNECT may want https://', async () => {
+    const tlsProxy = await startConnectProxy(plain.port, { tls: tlsFixture });
+    try {
+      await withEnv(env({ HTTP_PROXY: `http://localhost:${tlsProxy.port}` }), async () => {
+        await expect(guardedFetch('http://93.184.215.14/x')).rejects.toMatchObject({
+          message:
+            'the egress proxy closed the connection without answering; if it speaks TLS, the proxy URL should be https:// on the way to http://93.184.215.14',
+        });
+      });
+    } finally {
+      await tlsProxy.close();
     }
   });
 

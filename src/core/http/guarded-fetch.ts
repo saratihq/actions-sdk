@@ -27,9 +27,11 @@ const BAD_PORTS = new Set([
   3659, 4045, 4190, 5060, 5061, 6000, 6566, 6665, 6666, 6667, 6668, 6669, 6679, 6697, 10080,
 ]);
 const HEADER_NAME = /^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/;
-// fetch refuses a value with a line break, a NUL or a character beyond Latin-1, and its error repeats the value.
-function unsendableValue(value: string): boolean {
-  return /[\r\n]/.test(value) || value.includes('\0') || [...value].some((ch) => ch.charCodeAt(0) > 0xff);
+const FRAMING_HEADERS = new Set(['content-length']);
+// fetch trims leading and trailing whitespace, then refuses a line break, a NUL or a character beyond Latin-1, and its error repeats the value.
+function unsendableValue(value: unknown): boolean {
+  const text = String(value).replace(/^[\t\n\r ]+|[\t\n\r ]+$/g, '');
+  return /[\r\n]/.test(text) || text.includes('\0') || [...text].some((ch) => ch.charCodeAt(0) > 0xff);
 }
 
 function withoutHeaders(
@@ -48,7 +50,7 @@ function unsendable(origin: string, reason: string): ActionError {
   });
 }
 
-function assertSendable(url: URL, headers: Record<string, string> | undefined): void {
+function assertSendable(url: URL, { method, headers, body }: FetchInit): void {
   if (url.port && BAD_PORTS.has(Number(url.port))) {
     throw unsendable(
       url.origin,
@@ -64,11 +66,17 @@ function assertSendable(url: URL, headers: Record<string, string> | undefined): 
       );
     }
   }
+  if (body !== undefined && /^(GET|HEAD)$/i.test(method ?? 'GET')) {
+    throw unsendable(url.origin, `a ${(method ?? 'GET').toUpperCase()} request cannot carry a body`);
+  }
 }
 
-async function send(url: URL, { method, headers, body, signal }: FetchInit): Promise<Response> {
-  assertSendable(url, headers);
+async function send(url: URL, init: FetchInit): Promise<Response> {
+  assertSendable(url, init);
   preflightTarget(url, allowedHosts());
+  const { method, body, signal } = init;
+  // fetch frames the body itself; a pasted Content-Length that disagrees makes it wait without writing a byte.
+  const headers = withoutHeaders(init.headers, FRAMING_HEADERS);
   try {
     return await fetch(url, {
       method,
@@ -83,9 +91,13 @@ async function send(url: URL, { method, headers, body, signal }: FetchInit): Pro
     const cause = (err as { cause?: unknown }).cause;
     if (cause instanceof ActionError) throw cause;
     if (isNativeError(cause)) throw transportFailure(url.origin, cause, 'request');
-    // A TypeError with no cause is fetch refusing its own arguments; its message can repeat what it refused.
-    if (isNativeError(err) && err.name === 'TypeError')
-      throw unsendable(url.origin, 'fetch refused the request');
+    // A TypeError with no cause is fetch refusing its own arguments; only a Headers error can repeat a value.
+    if (isNativeError(err) && err.name === 'TypeError') {
+      throw unsendable(
+        url.origin,
+        err.message.startsWith('Headers.') ? 'fetch refused a header' : err.message,
+      );
+    }
     throw err;
   }
 }

@@ -189,9 +189,9 @@ export async function publicAddresses(host: string): Promise<string[]> {
   return [...addresses].sort((a, b) => Number(b.family === 4) - Number(a.family === 4)).map((a) => a.address);
 }
 
-/** `text` with any URL userinfo cut out, up to the last '@' before the path, so no password is echoed. */
+/** `text` with everything from '//' to the last '@' cut out, so no password is echoed whatever it contains. */
 export function withoutUserinfo(text: string): string {
-  return text.replace(/\/\/[^/?#]*@/, '//');
+  return text.replace(/\/\/.*@/s, '//');
 }
 
 /** Ahead-of-time check that `rawUrl` is http(s) and EVERY address its host resolves to is public; an unresolvable host fails closed. */
@@ -225,7 +225,11 @@ export const ssrfSafeLookup: LookupFunction = (hostname, options, callback) => {
     }
     const [first] = addresses;
     if (!first) {
-      return callback(Object.assign(new Error(`no address for ${hostname}`), { code: 'ENOTFOUND' }), '', 0);
+      const none = Object.assign(new Error(`no address for ${hostname}`), {
+        code: 'ENOTFOUND',
+        syscall: 'getaddrinfo',
+      });
+      return callback(none, '', 0);
     }
     return options.all ? callback(null, addresses) : callback(null, first.address, first.family);
   });

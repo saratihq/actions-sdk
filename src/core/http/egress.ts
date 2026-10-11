@@ -3,7 +3,7 @@ import { isNativeError } from 'node:util/types';
 
 import { Agent, buildConnector, type Dispatcher, Pool } from 'undici';
 
-import { ActionError, isTlsFailure, neverReached } from '../errors';
+import { ActionError, isCertificateFailure, isTlsFailure, neverReached } from '../errors';
 import {
   allowedHosts,
   isBlockedIp,
@@ -20,7 +20,6 @@ const PROXY_TIMEOUT_MS = 10_000;
 interface Proxy {
   pool: Pool;
   headers: Record<string, string>;
-  servername?: string;
 }
 
 interface NoProxy {
@@ -71,11 +70,14 @@ function proxyFor(name: string, raw: string | undefined): Proxy | null {
     }
     headers['proxy-authorization'] = `Basic ${Buffer.from(credentials).toString('base64')}`;
   }
-  const host = url.hostname.replace(/^\[|\]$/g, '');
+  // TLS to the proxy is always verified against the proxy's own host, never the target a CONNECT's Host header names.
+  const toProxy = buildConnector({ timeout: PROXY_TIMEOUT_MS });
   return {
-    pool: new Pool(url.origin, { connectTimeout: PROXY_TIMEOUT_MS, headersTimeout: PROXY_TIMEOUT_MS }),
+    pool: new Pool(url.origin, {
+      headersTimeout: PROXY_TIMEOUT_MS,
+      connect: (opts, callback) => toProxy({ ...opts, servername: undefined }, callback),
+    }),
     headers,
-    ...(isIP(host) ? {} : { servername: host }),
   };
 }
 
@@ -129,11 +131,21 @@ function proxyFailure(origin: string, cause: unknown): ActionError {
   const [reason, retryable] =
     code === 'UND_ERR_HEADERS_TIMEOUT'
       ? ['the egress proxy did not answer the tunnel request', true]
-      : isTlsFailure(cause)
+      : isCertificateFailure(cause)
         ? [`the egress proxy's certificate was rejected (${code})`, false]
-        : code === 'UND_ERR_HEADERS_OVERFLOW' || name === 'HTTPParserError' || code.startsWith('HPE_')
-          ? ['the egress proxy sent an invalid reply', false]
-          : ['the egress proxy could not be reached', true];
+        : isTlsFailure(cause)
+          ? [
+              `TLS to the egress proxy failed (${code}); check whether the proxy URL should be http:// or https://`,
+              false,
+            ]
+          : code === 'UND_ERR_HEADERS_OVERFLOW' || name === 'HTTPParserError' || code.startsWith('HPE_')
+            ? ['the egress proxy sent an invalid reply', false]
+            : code === 'UND_ERR_SOCKET'
+              ? [
+                  'the egress proxy closed the connection without answering; if it speaks TLS, the proxy URL should be https://',
+                  true,
+                ]
+              : ['the egress proxy could not be reached', true];
   return new ActionError({
     code: 'transport_unreachable',
     message: `${reason} on the way to ${origin}`,
@@ -153,7 +165,6 @@ async function openTunnel(proxy: Proxy, origin: string, targets: string[], port:
       connected = await proxy.pool.connect({
         path: authority,
         headers: { ...proxy.headers, host: authority },
-        ...(proxy.servername ? { servername: proxy.servername } : {}),
       });
     } catch (cause) {
       throw proxyFailure(origin, cause);
@@ -200,11 +211,23 @@ async function tunnel(
   });
 }
 
+// Everything the connector does happens before the request is written, so any failure in it is a host never reached.
+function directConnector(): buildConnector.connector {
+  const direct = buildConnector({ lookup: ssrfSafeLookup });
+  return (opts, callback) => {
+    direct(opts, (...result) => {
+      if (result[0] === null) callback(null, result[1]);
+      else if (result[0] instanceof ActionError) callback(result[0], null);
+      else callback(neverReached(`${opts.protocol}//${opts.host ?? opts.hostname}`, result[0]), null);
+    });
+  };
+}
+
 function proxiedConnector(
   proxies: Record<'http:' | 'https:', Proxy | null>,
   noProxy: NoProxy,
 ): buildConnector.connector {
-  const direct = buildConnector({ lookup: ssrfSafeLookup });
+  const direct = directConnector();
   const overTunnel = buildConnector({});
   return (opts, callback) => {
     const hostname = opts.hostname.replace(/^\[|\]$/g, '').toLowerCase();
@@ -223,7 +246,7 @@ function proxiedConnector(
 
 function createEgress(key: string, proxied: boolean): Egress {
   if (!proxied) {
-    const dispatcher = new Agent({ connect: buildConnector({ lookup: ssrfSafeLookup }) });
+    const dispatcher = new Agent({ connect: directConnector() });
     return { key, dispatcher, close: () => dispatcher.close() };
   }
   const httpProxy = proxyFor('HTTP_PROXY', envValue('http_proxy', 'HTTP_PROXY'));

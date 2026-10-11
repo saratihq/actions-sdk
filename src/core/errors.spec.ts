@@ -130,6 +130,16 @@ describe('transportFailure', () => {
   });
 
   it.each([
+    ['getaddrinfo EAI_FAIL x.example', 'EAI_FAIL', 'getaddrinfo'],
+    ['connect EADDRNOTAVAIL 1.2.3.4:443', 'EADDRNOTAVAIL', 'connect'],
+    ['no address for x.example', 'ENOTFOUND', undefined],
+  ])('calls "%s" never sent: the lookup or the connect itself failed', (message, code, syscall) => {
+    expect(transportFailure('https://x.example', coded(message, code, syscall), 'request')).toMatchObject({
+      code: 'transport_unreachable',
+    });
+  });
+
+  it.each([
     ['read ETIMEDOUT', 'ETIMEDOUT', 'read'],
     ['write EHOSTUNREACH', 'EHOSTUNREACH', 'write'],
   ])(
@@ -184,6 +194,16 @@ describe('transportFailure', () => {
       code: 'http_error',
       retryable: false,
       message: 'http://x.example:22 did not answer with HTTP: Response does not match the HTTP/1.1 protocol',
+    });
+  });
+
+  it.each([
+    ['ERR__ERROR_FORMAT_PADDING_1', 'Decompression failed'],
+    ['ZSTD_error_prefix_unknown', 'Unknown frame descriptor'],
+  ])('calls a %s body (brotli, zstd) a provider error too', (code, message) => {
+    expect(transportFailure('https://x.example', coded(message, code), 'response')).toMatchObject({
+      code: 'provider_error',
+      retryable: false,
     });
   });
 
