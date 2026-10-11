@@ -107,14 +107,16 @@ async function listSites(
   try {
     ({ data } = await http.get<unknown>(`${gateway}/oauth/token/accessible-resources`, { auth }));
   } catch (err) {
-    if (
-      err instanceof ActionError &&
-      err.code === 'http_error' &&
-      (err.status === 401 || err.status === 403)
-    ) {
-      return null;
-    }
-    throw err;
+    if (!(err instanceof ActionError) || err.code !== 'http_error') throw err;
+    if (err.status === 401 || err.status === 403) return null;
+    throw new ActionError({
+      code: 'http_error',
+      message: `Jira's site lookup failed: ${err.message}`,
+      status: err.status,
+      retryable: err.retryable,
+      detail: { provider: 'jira', status: err.status },
+      cause: err,
+    });
   }
   if (!Array.isArray(data)) {
     throw new ActionError({

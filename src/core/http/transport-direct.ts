@@ -127,17 +127,7 @@ export class DirectTransport implements Transport {
         const copy = prepared.body === undefined ? undefined : copyBody(prepared.body, bodyFingerprintBefore);
         if (copy === undefined) delete prepared.body;
         else prepared.body = copy;
-        try {
-          await this.scheme.apply(prepared, cred);
-        } catch (err) {
-          if (err instanceof ActionError) throw err;
-          throw new ActionError({
-            code: 'invalid_input',
-            message: `a custom scheme's apply failed, so nothing was sent: ${err instanceof Error ? err.message : String(err)}`,
-            retryable: false,
-            cause: err,
-          });
-        }
+        await unlessAborted(this.scheme.apply(prepared, cred), prepared.signal);
         break;
       }
       default: {
@@ -162,6 +152,27 @@ async function readBody<T>(url: string, read: () => Promise<T>): Promise<T> {
     const cause = (err as { cause?: unknown } | null)?.cause;
     const reason = isNativeError(cause) ? cause : isNativeError(err) ? err : new Error(String(err));
     throw transportFailure(new URL(url).origin, reason, 'response');
+  }
+}
+
+async function unlessAborted(work: unknown, signal: AbortSignal | undefined): Promise<void> {
+  const aborted = (): ActionError =>
+    new ActionError({
+      code: 'transport_timeout',
+      message: 'request aborted before it was sent',
+      retryable: false,
+    });
+  if (!signal) return void (await work);
+  if (signal.aborted) throw aborted();
+  let onAbort = (): void => undefined;
+  const abort = new Promise<never>((_, reject) => {
+    onAbort = () => reject(aborted());
+    signal.addEventListener('abort', onAbort, { once: true });
+  });
+  try {
+    await Promise.race([work, abort]);
+  } finally {
+    signal.removeEventListener('abort', onAbort);
   }
 }
 

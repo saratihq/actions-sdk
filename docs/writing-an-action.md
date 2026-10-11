@@ -83,6 +83,8 @@ is sent. On a direct connection a redirect never carries the credential to anoth
 body a `custom` scheme changed is never replayed to one. When user input becomes part of a hostname, pass it
 through `hostLabel` so a value like `evil.com#` can't escape the template.
 
+Use `none` for actions that need no credential (the utility actions).
+
 ### Upgrading to 0.2
 
 `origins` is now required on every `oauth2`, `apiKey`, `basic` and `custom` scheme. Its type is a
@@ -100,8 +102,9 @@ than replaced by another. Government Cloud needs `instanceUrl` set. 0.1.x fell b
 site when `instanceUrl` matched none of its sites; 0.2 refuses. A saved value that isn't the `https://` URL
 of one of the token's sites must be corrected, or cleared when the token reaches a single site.
 
-
-Use `none` for actions that need no credential (the utility actions).
+A `custom` scheme's `apply` may now be async: whatever it returns is awaited before anything is sent, so
+anything it awaits delays every request until it settles. Throw an `ActionError` from it to choose the
+code and whether the call is retried; any other error is retried like a failure to connect.
 
 ## HTTP client
 

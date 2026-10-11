@@ -195,7 +195,9 @@ function withTimeout(
 ): { signal: AbortSignal; expired: Promise<never>; dispose: () => void } {
   const controller = new AbortController();
   let timer: ReturnType<typeof setTimeout> | undefined;
+  let rejectExpired: (err: ActionError) => void = () => undefined;
   const expired = new Promise<never>((_, reject) => {
+    rejectExpired = reject;
     timer = setTimeout(() => {
       controller.abort(new DOMException('Timeout', 'TimeoutError'));
       reject(
@@ -210,9 +212,20 @@ function withTimeout(
   });
   // Swallow the rejection if it is never raced (attempt succeeded first).
   void expired.catch(() => undefined);
-  const onCallerAbort = (): void => controller.abort();
+  // A caller abort settles the race itself, so a transport that never looks at the signal can't hold the call open.
+  const onCallerAbort = (): void => {
+    controller.abort();
+    rejectExpired(
+      new ActionError({
+        code: 'transport_timeout',
+        message: 'request aborted by caller',
+        status: 0,
+        retryable: false,
+      }),
+    );
+  };
   if (caller) {
-    if (caller.aborted) controller.abort();
+    if (caller.aborted) onCallerAbort();
     else caller.addEventListener('abort', onCallerAbort, { once: true });
   }
   const dispose = (): void => {

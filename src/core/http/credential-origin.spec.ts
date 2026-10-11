@@ -1,4 +1,4 @@
-import type { AuthScheme, CredentialOrigins, DirectCredential, NoneScheme } from '../auth';
+import type { AuthScheme, CredentialOrigins, CustomScheme, DirectCredential, NoneScheme } from '../auth';
 import { createDirectAuth } from '../auth-factories';
 import {
   type LoopbackHit,
@@ -6,8 +6,10 @@ import {
   startLoopbackServer,
   withAllowedHosts,
 } from '../../testing/loopback-server';
+import { ActionError } from '../errors';
 import { HttpClient } from './client';
 import { guardedFetch } from './guarded-fetch';
+import { DirectTransport } from './transport-direct';
 import type { JsonValue } from './types';
 import { paginate } from './pagination';
 
@@ -388,27 +390,87 @@ describe('a credential never reaches a foreign origin — real sockets', () => {
     expect(foreign.hits.map((h) => h.headers['x-signature'])).toEqual([undefined]);
   });
 
-  it('a custom apply that rejects is a typed error, and nothing is sent', async () => {
-    const auth = createDirectAuth(
-      {
-        type: 'custom',
-        origins: [providerOrigin],
-        apply: async () => {
-          await Promise.resolve();
-          throw new Error('signing key unavailable');
-        },
+  const failingApply = (apply: CustomScheme['apply']) =>
+    createDirectAuth({ type: 'custom', origins: [providerOrigin], apply }, { type: 'apiKey', value: SECRET });
+
+  it.each([
+    [
+      'a sync throw',
+      () => {
+        throw new Error('signing key unavailable');
       },
-      { type: 'apiKey', value: SECRET },
-    );
-    await expect(
-      withAllowedHosts('127.0.0.1', () => http.get(`${providerOrigin}/ok`, { auth })),
-    ).rejects.toMatchObject({
-      code: 'invalid_input',
-      retryable: false,
-      message: expect.stringContaining('signing key unavailable'),
+    ],
+    [
+      'a rejection',
+      async () => {
+        await Promise.resolve();
+        throw new Error('signing key unavailable');
+      },
+    ],
+  ])(
+    '%s from apply is retried and then reported as a failure to connect, with nothing sent',
+    async (_label, apply) => {
+      const calls = jest.fn(apply);
+      const retrying = new HttpClient({
+        retry: { retries: 1, baseDelayMs: 1, maxDelayMs: 1, jitter: false },
+      });
+      await expect(
+        withAllowedHosts('127.0.0.1', () =>
+          retrying.get(`${providerOrigin}/ok`, { auth: failingApply(calls) }),
+        ),
+      ).rejects.toMatchObject({
+        code: 'transport_unreachable',
+        retryable: true,
+        message: expect.stringContaining('signing key unavailable'),
+      });
+      expect(calls).toHaveBeenCalledTimes(2);
+      expect(provider.hits).toHaveLength(0);
+    },
+  );
+
+  it('an ActionError thrown by apply keeps its code and is not retried when it says so', async () => {
+    const calls = jest.fn(() => {
+      throw new ActionError({ code: 'auth_missing', message: 'no signing key configured', retryable: false });
     });
+    const retrying = new HttpClient({ retry: { retries: 1, baseDelayMs: 1, maxDelayMs: 1, jitter: false } });
+    await expect(
+      withAllowedHosts('127.0.0.1', () =>
+        retrying.get(`${providerOrigin}/ok`, { auth: failingApply(calls) }),
+      ),
+    ).rejects.toMatchObject({ code: 'auth_missing', retryable: false });
+    expect(calls).toHaveBeenCalledTimes(1);
     expect(provider.hits).toHaveLength(0);
   });
+
+  it('a caller abort while an async apply is pending ends the call at once, with the usual abort error', async () => {
+    const controller = new AbortController();
+    const slow = new HttpClient({ retry: { retries: 0 }, defaultTimeoutMs: 5_000 });
+    const started = Date.now();
+    setTimeout(() => controller.abort(), 20);
+    await expect(
+      withAllowedHosts('127.0.0.1', () =>
+        slow.get(`${providerOrigin}/ok`, {
+          auth: failingApply(() => new Promise(() => undefined)),
+          signal: controller.signal,
+        }),
+      ),
+    ).rejects.toMatchObject({ code: 'transport_timeout', message: 'request aborted by caller' });
+    expect(Date.now() - started).toBeLessThan(1_000);
+    expect(provider.hits).toHaveLength(0);
+  });
+
+  it('DirectTransport.send with an aborted signal does not wait on a pending apply', async () => {
+    const transport = new DirectTransport({
+      scheme: { type: 'custom', origins: [providerOrigin], apply: () => new Promise(() => undefined) },
+      credential: { type: 'apiKey', value: SECRET },
+    });
+    const controller = new AbortController();
+    controller.abort();
+    await expect(
+      transport.send({ method: 'GET', url: `${providerOrigin}/ok`, headers: {}, signal: controller.signal }),
+    ).rejects.toMatchObject({ code: 'transport_timeout', message: 'request aborted before it was sent' });
+    expect(provider.hits).toHaveLength(0);
+  }, 2_000);
 
   it('a header object mutated after the first hop never reaches a later hop', async () => {
     const headers: Record<string, string> = { accept: 'application/json' };

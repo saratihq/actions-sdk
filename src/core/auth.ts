@@ -42,8 +42,8 @@ export interface NoneScheme {
 export interface CustomScheme {
   type: 'custom';
   origins: CredentialOrigins;
-  /** Mutates the outbound request to attach the credential, synchronously or by the time its promise settles. Must not throw for missing creds — return unmodified. */
-  apply(request: NormalizedRequest, credential: DirectCredential): void | Promise<void>;
+  /** Mutates the outbound request to attach the credential; a returned promise is awaited before anything is sent. Must not throw for missing creds — return unmodified. */
+  apply(request: NormalizedRequest, credential: DirectCredential): unknown;
 }
 
 export type AuthScheme = OAuth2Scheme | ApiKeyScheme | BasicScheme | NoneScheme | CustomScheme;

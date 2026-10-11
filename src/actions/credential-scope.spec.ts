@@ -273,6 +273,7 @@ describe('instance URLs on each vendor-documented cloud domain are reached; any 
       code: 'http_error',
       status: 429,
       retryable: true,
+      message: "Jira's site lookup failed: HTTP 429",
     });
     expect(broker.requests).toHaveLength(1);
   });
@@ -285,7 +286,12 @@ describe('instance URLs on each vendor-documented cloud domain are reached; any 
         props: { ...issueProps, instanceUrl: 'https://acme.atlassian.net' },
         http: noRetry(),
       }),
-    ).rejects.toMatchObject({ code: 'http_error', status: 503, retryable: true });
+    ).rejects.toMatchObject({
+      code: 'http_error',
+      status: 503,
+      retryable: true,
+      message: "Jira's site lookup failed: HTTP 503",
+    });
     expect(broker.requests.map((r) => new URL(r.url).pathname)).toEqual([
       '/oauth/token/accessible-resources',
     ]);
@@ -303,6 +309,27 @@ describe('instance URLs on each vendor-documented cloud domain are reached; any 
       }),
     ).rejects.toMatchObject({ code: 'transport_unreachable', retryable: true });
   });
+
+  it.each([
+    ['blank', {}],
+    ['set', { instanceUrl: 'https://acme.atlassian.net' }],
+  ])(
+    'a broker transport error carrying status 401 on the site lookup (field %s) is that error, not "cannot list"',
+    async (_label, extra) => {
+      const broker = new FakeTransport(() => {
+        throw new ActionError({
+          code: 'transport_unreachable',
+          message: 'broker rejected the call',
+          status: 401,
+          retryable: false,
+        });
+      });
+      await expect(
+        createIssue.execute({ auth: createAuth(jiraAuth, broker), props: { ...issueProps, ...extra } }),
+      ).rejects.toMatchObject({ code: 'transport_unreachable', status: 401 });
+      expect(broker.requests).toHaveLength(1);
+    },
+  );
 
   it('a site lookup that 503s once is retried by the client like any other call, and the step resolves', async () => {
     let lookups = 0;
