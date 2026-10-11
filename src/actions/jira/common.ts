@@ -49,7 +49,12 @@ function invalidInstanceUrl(message: string): ActionError {
 function classifySite(instanceUrl: string): { origin: string; gateway: string } {
   const url = parsed(instanceUrl);
   const cloud =
-    url && url.protocol === 'https:' && url.port === '' && !url.username && !url.password
+    url &&
+    url.protocol === 'https:' &&
+    url.port === '' &&
+    !url.username &&
+    !url.password &&
+    !url.hostname.split('.').includes('')
       ? SITE_GATEWAYS.find(([suffix]) => url.hostname.endsWith(suffix))
       : undefined;
   if (!url || !cloud) {
@@ -92,28 +97,33 @@ function normaliseSite(url: string): string {
   return parsed(url)?.origin ?? url;
 }
 
-/** List the Jira sites the token can reach; never throws — `[]` means "fall back to the site URL". */
-async function fetchAccessibleResources(
+/** The sites the token can reach; `null` when the credential can't list sites (401/403). Any other failure throws. */
+async function listSites(
   http: HttpClient,
   auth: AuthHandle,
   gateway: string,
-): Promise<AtlassianResource[]> {
-  try {
-    const res = await http.get<unknown>(`${gateway}/oauth/token/accessible-resources`, {
-      auth,
-      throwOnError: false,
+): Promise<AtlassianResource[] | null> {
+  const res = await http.get<unknown>(`${gateway}/oauth/token/accessible-resources`, {
+    auth,
+    throwOnError: false,
+  });
+  if (res.status === 401 || res.status === 403) return null;
+  if (res.status < 200 || res.status >= 300) {
+    throw new ActionError({
+      code: 'http_error',
+      message: `could not list the Jira sites this connection reaches (HTTP ${res.status})`,
+      status: res.status,
+      detail: { provider: 'jira' },
     });
-    if (res.status < 200 || res.status >= 300 || !Array.isArray(res.data)) return [];
-    return res.data.filter(
-      (r): r is AtlassianResource =>
-        typeof r === 'object' &&
-        r !== null &&
-        typeof (r as AtlassianResource).id === 'string' &&
-        typeof (r as AtlassianResource).url === 'string',
-    );
-  } catch {
-    return [];
   }
+  if (!Array.isArray(res.data)) return [];
+  return res.data.filter(
+    (r): r is AtlassianResource =>
+      typeof r === 'object' &&
+      r !== null &&
+      typeof (r as AtlassianResource).id === 'string' &&
+      typeof (r as AtlassianResource).url === 'string',
+  );
 }
 
 /** Resolve the REST v3 base: the gateway's `ex/jira/<cloudId>` on OAuth (a bare site URL 401s), else the site itself. */
@@ -123,17 +133,23 @@ export async function resolveJiraBase(
   instanceUrl?: string,
 ): Promise<string> {
   const site = instanceUrl?.trim() ? classifySite(instanceUrl) : null;
-  // A direct (API-token) credential can't list sites, so without one its cloud can't be known: refuse before sending it.
-  if (!site && transportKind(auth) === 'direct') {
-    throw invalidInstanceUrl(
-      'instanceUrl is required for an API-token connection — set it to your Jira site',
-    );
+  // A direct (API-token) credential can't list sites: it goes straight to the site, and without one its cloud is unknown.
+  if (transportKind(auth) === 'direct') {
+    if (!site)
+      throw invalidInstanceUrl(
+        'instanceUrl is required for an API-token connection — set it to your Jira site',
+      );
+    return `${site.origin}${API_PATH}`;
   }
   const gateway = site?.gateway ?? GATEWAY;
-  const sites = await fetchAccessibleResources(http, auth, gateway);
+  const sites = await listSites(http, auth, gateway);
+  if (sites === null) {
+    if (site) return `${site.origin}${API_PATH}`;
+    throw invalidInstanceUrl('this connection cannot list its Jira sites — set instanceUrl to your site');
+  }
+  if (sites.length === 0) throw invalidInstanceUrl('this connection reaches no Jira site');
   const reachable = sites.map((s) => normaliseSite(s.url)).join(', ');
   if (site) {
-    if (sites.length === 0) return `${site.origin}${API_PATH}`;
     const matched = sites.find((s) => normaliseSite(s.url) === site.origin);
     if (!matched) {
       throw invalidInstanceUrl(
@@ -144,9 +160,7 @@ export async function resolveJiraBase(
   }
   if (sites.length === 1) return `${gateway}/ex/jira/${sites[0]!.id}${API_PATH}`;
   throw invalidInstanceUrl(
-    sites.length === 0
-      ? 'could not resolve the Jira site from this connection — set instanceUrl to your site'
-      : `this connection can reach several Jira sites (${reachable}) — set instanceUrl to the one to use`,
+    `this connection can reach several Jira sites (${reachable}) — set instanceUrl to the one to use`,
   );
 }
 

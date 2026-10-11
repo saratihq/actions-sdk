@@ -1,4 +1,4 @@
-import type { AuthScheme, DirectCredential, NoneScheme } from '../auth';
+import type { AuthScheme, CustomScheme, DirectCredential, NoneScheme } from '../auth';
 import { createDirectAuth } from '../auth-factories';
 import {
   type LoopbackHit,
@@ -7,7 +7,8 @@ import {
   withAllowedHosts,
 } from '../../testing/loopback-server';
 import { HttpClient } from './client';
-import type { JsonValue } from './types';
+import { guardedFetch } from './guarded-fetch';
+import type { JsonValue, NormalizedRequest } from './types';
 import { paginate } from './pagination';
 
 type Unscoped<T> = T extends unknown ? Omit<T, 'origins'> : never;
@@ -63,6 +64,7 @@ describe('a credential never reaches a foreign origin — real sockets', () => {
   let provider: LoopbackServer;
   let foreign: LoopbackServer;
   let providerOrigin: string;
+  let lateHeaders: Record<string, string> | undefined;
   let foreignOrigin: string;
 
   beforeEach(async () => {
@@ -71,6 +73,12 @@ describe('a credential never reaches a foreign origin — real sockets', () => {
       const to = url.searchParams.get('to');
       if (url.pathname === '/redirect' && to) {
         res.writeHead(Number(url.searchParams.get('status')), { location: to });
+        res.end();
+        return;
+      }
+      if (url.pathname === '/mutate') {
+        if (lateHeaders) lateHeaders['x-late'] = SECRET;
+        res.writeHead(307, { location: '/after' });
         res.end();
         return;
       }
@@ -274,7 +282,7 @@ describe('a credential never reaches a foreign origin — real sockets', () => {
     expect(foreign.hits).toHaveLength(0);
   });
 
-  describe('a custom scheme sends a body exactly as 0.1.6 did', () => {
+  describe('a custom scheme sends the body as JSON.stringify of the original', () => {
     class Money {
       constructor(private readonly cents: number) {}
       toJSON(): string {
@@ -346,6 +354,45 @@ describe('a credential never reaches a foreign origin — real sockets', () => {
       expect(foreign.hits).toHaveLength(0);
       expect(data.toString()).toBe('{"token":"XXXXXX"}');
     });
+  });
+
+  it('refuses an async apply before anything is sent, so its late signature can never ride a redirect', async () => {
+    const auth = createDirectAuth(
+      {
+        type: 'custom',
+        origins: [providerOrigin],
+        apply: ((req: NormalizedRequest, cred: DirectCredential) =>
+          Promise.resolve(`sig-${cred.type === 'apiKey' ? cred.value : ''}`).then((sig) => {
+            req.headers['x-signature'] = sig;
+          })) as unknown as CustomScheme['apply'],
+      },
+      { type: 'apiKey', value: SECRET },
+    );
+    await expect(
+      withAllowedHosts('127.0.0.1', () =>
+        http.post(redirectUrl(`${foreignOrigin}/landing`, 307), { auth, body: { a: 1 } }),
+      ),
+    ).rejects.toMatchObject({
+      code: 'invalid_input',
+      message: expect.stringContaining('must be synchronous'),
+    });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(provider.hits).toHaveLength(0);
+    expect(foreign.hits).toHaveLength(0);
+  });
+
+  it('a header object mutated after the first hop never reaches a later hop', async () => {
+    const headers: Record<string, string> = { accept: 'application/json' };
+    lateHeaders = headers;
+    try {
+      await withAllowedHosts('127.0.0.1', () => guardedFetch(`${providerOrigin}/mutate`, { headers }));
+    } finally {
+      lateHeaders = undefined;
+    }
+    expect(provider.hits.map((h) => [h.url, h.headers['x-late']])).toEqual([
+      ['/mutate', undefined],
+      ['/after', undefined],
+    ]);
   });
 
   describe('a custom scheme that edits the body in place', () => {

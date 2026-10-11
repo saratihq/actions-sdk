@@ -43,13 +43,15 @@ export class DirectTransport implements Transport {
   }
 
   async send(request: NormalizedRequest): Promise<NormalizedResponse> {
-    const bodyBefore = this.scheme.type === 'custom' ? bodySnapshot(request.body) : undefined;
+    const custom = this.scheme.type === 'custom';
+    const bodyBefore = custom ? bodyFingerprint(request.body) : undefined;
     const prepared = this.applyAuth(request, bodyBefore);
     if (this.scope) prepared.url = this.scope.admit(prepared.url).href;
     const credentialHeaders = changedHeaders(request.headers, prepared.headers);
     const credentialParams = changedParams(request.url, prepared.url);
-    const credentialBody = this.scheme.type === 'custom' && bodySnapshot(prepared.body) !== bodyBefore;
-    const wireBody = this.encodeBody(prepared);
+    const bodyAfter = custom ? bodyFingerprint(prepared.body) : undefined;
+    const credentialBody = custom && bodyAfter !== bodyBefore;
+    const wireBody = this.encodeBody(prepared, bodyAfter);
     const res = await this.fetchImpl(prepared.url, {
       method: prepared.method,
       headers: prepared.headers,
@@ -75,8 +77,8 @@ export class DirectTransport implements Transport {
     return { status: res.status, headers, data: parseBody(text, headers['content-type']) };
   }
 
-  /** Serialise the body for the wire and set its Content-Type on the already-copied `prepared.headers`. */
-  private encodeBody(prepared: NormalizedRequest): string | Buffer | undefined {
+  /** Serialise the body for the wire and set its Content-Type on the already-copied `prepared.headers`; a JSON body's fingerprint is its wire text. */
+  private encodeBody(prepared: NormalizedRequest, fingerprint?: string): string | Buffer | undefined {
     if (prepared.body === undefined) return undefined;
     if (isMultipartBody(prepared.body)) {
       const { body, contentType } = encodeMultipart(prepared.body);
@@ -87,11 +89,11 @@ export class DirectTransport implements Transport {
       prepared.headers['content-type'] = 'application/x-www-form-urlencoded';
       return encodeForm(prepared.body);
     }
-    return JSON.stringify(prepared.body);
+    return fingerprint ?? JSON.stringify(prepared.body);
   }
 
   /** Attach the credential to a COPY of the request (never mutate the caller's object). */
-  private applyAuth(request: NormalizedRequest, bodySnapshotBefore?: string): NormalizedRequest {
+  private applyAuth(request: NormalizedRequest, bodyFingerprintBefore?: string): NormalizedRequest {
     const prepared: NormalizedRequest = { ...request, headers: { ...request.headers } };
     const cred = this.credential;
 
@@ -119,10 +121,19 @@ export class DirectTransport implements Transport {
         }
         break;
       case 'custom': {
-        const copy = prepared.body === undefined ? undefined : copyBody(prepared.body, bodySnapshotBefore);
+        const copy = prepared.body === undefined ? undefined : copyBody(prepared.body, bodyFingerprintBefore);
         if (copy === undefined) delete prepared.body;
         else prepared.body = copy;
-        this.scheme.apply(prepared, cred);
+        const applied: unknown = this.scheme.apply(prepared, cred);
+        if (typeof (applied as { then?: unknown } | null)?.then === 'function') {
+          Promise.resolve(applied).catch(() => undefined);
+          throw new ActionError({
+            code: 'invalid_input',
+            message:
+              "a custom scheme's apply must be synchronous — it returned a promise, so nothing was sent",
+            retryable: false,
+          });
+        }
         break;
       }
       default: {
@@ -150,8 +161,8 @@ async function readBody<T>(url: string, read: () => Promise<T>): Promise<T> {
   }
 }
 
-// apply() edits a copy taken through the wire form, so it sends what 0.1.6 sent and a retry or reused body starts clean.
-function copyBody(body: RequestBody, wire: string | undefined): RequestBody | undefined {
+// apply() edits a copy taken through the wire form, so a retry or a reused body starts clean.
+function copyBody(body: RequestBody, fingerprint: string | undefined): RequestBody | undefined {
   if (isMultipartBody(body)) {
     return {
       [MULTIPART]: true,
@@ -162,10 +173,11 @@ function copyBody(body: RequestBody, wire: string | undefined): RequestBody | un
   }
   if (isFormBody(body))
     return { [FORM]: true, fields: body.fields.map(([name, value]) => [name, value] as const) };
-  return wire === undefined ? undefined : (JSON.parse(wire) as RequestBody);
+  return fingerprint === undefined ? undefined : (JSON.parse(fingerprint) as RequestBody);
 }
 
-function bodySnapshot(body: RequestBody | undefined): string | undefined {
+/** What a body would send: a JSON body's exact wire text, form fields, or multipart parts with each file's sha256. */
+function bodyFingerprint(body: RequestBody | undefined): string | undefined {
   if (body === undefined) return undefined;
   if (isMultipartBody(body)) {
     return JSON.stringify(

@@ -182,7 +182,7 @@ function namingRedirect(err: unknown, url: URL, from: string | undefined): unkno
 /** The SDK's network hop: fetch, except every dialled address must be public, every redirect hop is re-guarded, the credential never leaves its origin, and Node's env proxy is honoured. */
 export const guardedFetch: FetchLike = async (input, init = {}) => {
   let url = requestUrl(input);
-  let request = init;
+  let request: FetchInit = { ...init, headers: { ...init.headers } };
   let from: string | undefined;
   const offOriginDropped = new Set([
     ...CROSS_ORIGIN_DROPPED_HEADERS,

@@ -96,7 +96,9 @@ Jira's `instanceUrl` (and `actions.jira.resolveJiraBase`) is now checked before 
 an `https` site on `*.atlassian.net`, `*.jira.com` or `*.atlassian-us-gov-mod.net`, and that domain picks
 the gateway. Left blank, it is refused on an API-token connection and, on a managed connection, resolves
 only when the token reaches exactly one site; a URL that is none of the token's sites is refused rather
-than replaced by another. Government Cloud needs `instanceUrl` set.
+than replaced by another. Government Cloud needs `instanceUrl` set. 0.1.x ignored `instanceUrl` on a
+managed connection and 0.2 checks it, so a saved value that isn't `https://` and one of the token's sites
+must be cleared or corrected.
 
 
 Use `none` for actions that need no credential (the utility actions).
