@@ -172,11 +172,24 @@ describe.each([
   it.each<[string, AuthScheme, unknown]>([
     ['a bearer token that is null', { type: 'oauth2', origins: [ORIGIN] }, { type: 'bearer', token: null }],
     ['an apiKey value that is a number', keyHeader, { type: 'apiKey', value: 12345678 }],
+    ['a none scheme and no credential', { type: 'none' }, undefined],
+    ['a none scheme and a null credential', { type: 'none' }, null],
   ])('still sends, as 0.2.0 did, with %s', async (_kind, scheme, credential) => {
     const fetchImpl = jest.fn(replying(() => fakeResponse(401, 'nope')));
     const err = await failureOf(call(scheme, credential as DirectCredential, fetchImpl));
     expect(err).toMatchObject({ code: 'http_error', status: 401, message: 'HTTP 401: nope' });
     expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
+  it.each<[string, AuthScheme, unknown]>([
+    ['an apiKey value', keyHeader, { type: 'apiKey', value: 12345678 }],
+    ['a bearer token', { type: 'oauth2', origins: [ORIGIN] }, { type: 'bearer', token: 12345678 }],
+    ['a Basic password', basicAuth, { type: 'basic', username: 'me@acme.test', password: 12345678 }],
+  ])('when the provider echoes %s saved as a number', async (_kind, scheme, credential) => {
+    const fetchImpl = replying(() => fakeResponse(401, 'no access for me@acme.test with 12345678'));
+    const err = await failureOf(call(scheme, credential as DirectCredential, fetchImpl));
+    expect((err as Error).message).toBe('HTTP 401: no access for me@acme.test with [redacted]');
+    expectScrubbed(err, ['12345678']);
   });
 
   it('a Basic username is left alone when the password is the secret', async () => {

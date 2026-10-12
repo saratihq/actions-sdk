@@ -157,15 +157,18 @@ function isSecret(value: unknown): value is string {
   return typeof value === 'string' && value.length >= MIN_SECRET_LENGTH && /\S/.test(value);
 }
 
-function credentialSecrets(credential: DirectCredential, scheme: AuthScheme): string[] {
-  switch (credential.type) {
+const asText = (value: unknown): unknown =>
+  typeof value === 'number' && Number.isFinite(value) ? String(value) : value;
+
+function credentialSecrets(credential: DirectCredential | null | undefined, scheme: AuthScheme): unknown[] {
+  switch (credential?.type) {
     case 'bearer':
-      return [credential.token];
+      return [asText(credential.token)];
     case 'apiKey':
-      return [credential.value];
+      return [asText(credential.value)];
     case 'basic': {
-      const { username, password } = credential;
-      const pair = Buffer.from(`${username}:${password}`).toString('base64');
+      const [username, password] = [asText(credential.username), asText(credential.password)];
+      const pair = Buffer.from(`${credential.username}:${credential.password}`).toString('base64');
       // A blank or placeholder password also means the key rides as the username (Stripe, Freshdesk, BambooHR).
       const keyAsUsername = (scheme.type === 'basic' && scheme.keyAsUsername === true) || !isSecret(password);
       return keyAsUsername ? [password, username, pair] : [password, pair];
