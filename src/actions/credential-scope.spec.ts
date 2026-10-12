@@ -473,8 +473,8 @@ describe('instance URLs on each vendor-documented cloud domain are reached; any 
   });
 
   it.each([
-    ['jira.acme-corp.example', 'has no https:// and is not a Jira Cloud site address'],
-    ['acme.atlassian.net:8443', 'has no https:// and is not a Jira Cloud site address'],
+    ['jira.acme-corp.example', 'is not a Jira Cloud site address —'],
+    ['acme.atlassian.net:8443', 'is not a Jira Cloud site address —'],
     ['https://jira.acme-corp.example', 'is not a Jira Cloud site —'],
     ['https:/jira.acme-corp.example', 'is not a Jira Cloud site —'],
     ['ftp://acme.atlassian.net', 'is not a Jira Cloud site —'],

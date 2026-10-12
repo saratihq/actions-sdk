@@ -41,7 +41,7 @@ export class DirectTransport implements Transport {
     this.credential = options.credential;
     this.fetchImpl = options.fetchImpl ?? guardedFetch;
     this.scope = credentialScope(options.scheme);
-    this.applied = appliedSecrets(options.credential);
+    this.applied = appliedSecrets(options.credential, options.scheme);
   }
 
   redact(text: string): string {
@@ -157,7 +157,7 @@ function isSecret(value: unknown): value is string {
   return typeof value === 'string' && value.length >= MIN_SECRET_LENGTH && /\S/.test(value);
 }
 
-function credentialSecrets(credential: DirectCredential): string[] {
+function credentialSecrets(credential: DirectCredential, scheme: AuthScheme): string[] {
   switch (credential.type) {
     case 'bearer':
       return [credential.token];
@@ -166,8 +166,9 @@ function credentialSecrets(credential: DirectCredential): string[] {
     case 'basic': {
       const { username, password } = credential;
       const pair = Buffer.from(`${username}:${password}`).toString('base64');
-      // A blank or placeholder password means the key rides as the username (Stripe, Freshdesk, BambooHR).
-      return isSecret(password) ? [password, pair] : [password, username, pair];
+      // A blank or placeholder password also means the key rides as the username (Stripe, Freshdesk, BambooHR).
+      const keyAsUsername = (scheme.type === 'basic' && scheme.keyAsUsername === true) || !isSecret(password);
+      return keyAsUsername ? [password, username, pair] : [password, pair];
     }
     default:
       return [];
@@ -194,8 +195,10 @@ function spellings(secret: string): Array<[text: string, pattern: string]> {
   return [...[secret, json, json.replaceAll('/', '\\/')].map(literal), ...encoded.map(percentEncoded)];
 }
 
-function appliedSecrets(credential: DirectCredential): RegExp | null {
-  const patterns = new Map(credentialSecrets(credential).filter(isSecret).flatMap(spellings));
+function appliedSecrets(credential: DirectCredential, scheme: AuthScheme): RegExp | null {
+  // The wire trims a header value's surrounding whitespace, and a provider may trim what it echoes.
+  const secrets = credentialSecrets(credential, scheme).flatMap((secret) => [secret, secret.trim()]);
+  const patterns = new Map(secrets.filter(isSecret).flatMap(spellings));
   if (patterns.size === 0) return null;
   // Longest first, so a spelling that contains another is redacted whole.
   const alternatives = [...patterns].sort(([a], [b]) => b.length - a.length).map(([, pattern]) => pattern);

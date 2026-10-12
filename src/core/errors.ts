@@ -251,19 +251,47 @@ export function scrubError(err: unknown, redact?: (text: string) => string): unk
   }
 }
 
-/** @deprecated Use {@link scrubError}; kept for 0.2.0 deep imports, it always returns an `Error`. */
+/** A raw failure cut to its name, message, stack, `code`, `errno`, `syscall` and the same of its cause, then scrubbed: what diagnoses it, never the request it carried. */
 export function redactedError(err: unknown): Error {
-  const scrubbed = scrubError(err);
-  return scrubbed instanceof Error ? scrubbed : new Error(String(scrubbed));
+  try {
+    return scrubError(diagnostic(err, new Set())) as Error;
+  } catch {
+    return new Error(REDACTED);
+  }
+}
+
+const DIAGNOSTIC_FIELDS = ['code', 'errno', 'syscall'];
+
+function diagnostic(err: unknown, seen: Set<Error>): Error {
+  if (!(err instanceof Error)) return new Error(String(err));
+  seen.add(err);
+  const text = (key: string): string | undefined => {
+    const value = read(err, key);
+    return typeof value === 'string' ? value : undefined;
+  };
+  const copy = new Error(text('message') ?? '');
+  copy.name = text('name') ?? copy.name;
+  copy.stack = text('stack') ?? header(copy.name, copy.message);
+  for (const key of DIAGNOSTIC_FIELDS) {
+    const value = read(err, key);
+    if (typeof value === 'string' || typeof value === 'number') Object.assign(copy, { [key]: value });
+  }
+  const cause = read(err, 'cause');
+  if (cause instanceof Error && !seen.has(cause)) copy.cause = diagnostic(cause, seen);
+  return copy;
 }
 
 // Fails closed: what the scrubber cannot walk leaves as its scrubbed message and an ActionError's machine fields.
 function withheld(err: unknown, clean: (text: string) => string): ActionError {
-  const shape =
-    err instanceof ActionError
-      ? { code: err.code, status: err.status, retryable: err.retryable }
-      : { code: 'unknown' as const, retryable: false };
-  return new ActionError({ ...shape, message: scrubbedMessage(err, clean) });
+  try {
+    const shape =
+      err instanceof ActionError
+        ? { code: err.code, status: err.status, retryable: err.retryable }
+        : { code: 'unknown' as const, retryable: false };
+    return new ActionError({ ...shape, message: scrubbedMessage(err, clean) });
+  } catch {
+    return new ActionError({ code: 'unknown', message: REDACTED, retryable: false });
+  }
 }
 
 function scrubbedMessage(err: unknown, clean: (text: string) => string): string {
@@ -298,7 +326,7 @@ class Scrubber {
 
   value(value: unknown): unknown {
     if (typeof value === 'string') return this.clean(value);
-    if (typeof value === 'function') return undefined;
+    if (typeof value === 'function' || typeof value === 'symbol') return undefined;
     if (typeof value !== 'object' || value === null) return value;
     const copied = this.copies.get(value);
     if (copied) return copied;

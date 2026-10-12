@@ -1,5 +1,12 @@
 import { type AuthHandle, transportOf } from '../auth';
-import { ActionError, isRetryableStatus, type NormalizedFailure, scrubError, scrubText } from '../errors';
+import {
+  ActionError,
+  isRetryableStatus,
+  type NormalizedFailure,
+  redactedError,
+  scrubError,
+  scrubText,
+} from '../errors';
 import { buildForm, type FormInput } from './form';
 import { buildMultipart, type MultipartInput } from './multipart';
 import { backoffDelay, DEFAULT_RETRY_POLICY, parseRetryAfter, type RetryPolicy, sleep } from './retry';
@@ -166,7 +173,7 @@ export class HttpClient {
       } catch (err) {
         // Transport-level throw (unreachable/timeout/aborted) already normalised.
         if (err instanceof ActionError) thrown = err;
-        else cause = err;
+        else cause = redactedError(err);
         failure =
           err instanceof ActionError ? err.toFailure() : { status: 0, message: String(err), retryable: true };
       } finally {

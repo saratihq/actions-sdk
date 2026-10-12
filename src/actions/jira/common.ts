@@ -71,7 +71,7 @@ function classifySite(instanceUrl: string): { origin: string; gateway: string } 
   if (!url || !cloud) {
     throw invalidInstanceUrl(
       schemeless
-        ? `instanceUrl "${instanceUrl}" has no https:// and is not a Jira Cloud site address — use e.g. ${CLOUD_EXAMPLES}`
+        ? `instanceUrl "${instanceUrl}" is not a Jira Cloud site address — use e.g. ${CLOUD_EXAMPLES}`
         : `instanceUrl "${instanceUrl}" is not a Jira Cloud site — use e.g. ${CLOUD_EXAMPLES}`,
     );
   }

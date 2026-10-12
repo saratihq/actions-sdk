@@ -31,6 +31,8 @@ export interface ApiKeyScheme {
 export interface BasicScheme {
   type: 'basic';
   origins: CredentialOrigins;
+  /** The provider takes the API key as the username (`<key>:api_token`), so the username is scrubbed from failures like the password. */
+  keyAsUsername?: boolean;
 }
 
 /** No authentication (public endpoints). */

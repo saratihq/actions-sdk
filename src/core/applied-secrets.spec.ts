@@ -1,9 +1,10 @@
 import { inspect } from 'node:util';
 
 import { fakeResponse } from '../testing/fakes';
+import { type LoopbackServer, startLoopbackServer, withAllowedHosts } from '../testing/loopback-server';
 import { MemoryStore } from '../testing/memory-store';
 import { defineAction } from './action';
-import type { AuthHandle, AuthScheme, DirectCredential } from './auth';
+import type { AuthHandle, AuthScheme, DirectCredential, NoneScheme } from './auth';
 import { createAuth, createDirectAuth } from './auth-factories';
 import { ActionError } from './errors';
 import { HttpClient } from './http/client';
@@ -18,6 +19,7 @@ const http = new HttpClient({ retry: { retries: 0 } });
 const keyHeader: AuthScheme = { type: 'apiKey', origins: [ORIGIN], in: 'header', name: 'x-api-key' };
 const keyQuery: AuthScheme = { type: 'apiKey', origins: [ORIGIN], in: 'query', name: 'sig' };
 const basicAuth: AuthScheme = { type: 'basic', origins: [ORIGIN] };
+const keyAsUsername: AuthScheme = { type: 'basic', origins: [ORIGIN], keyAsUsername: true };
 const apiKey = (value: string): DirectCredential => ({ type: 'apiKey', value });
 
 const seen = (value: unknown): string => inspect(value, { depth: Infinity, showHidden: true });
@@ -53,14 +55,14 @@ async function echoed(client: HttpClient, auth: AuthHandle): Promise<string> {
   return data.echo;
 }
 
-const callAction = (scheme: AuthScheme) =>
+const callAction = (scheme: AuthScheme, origin = ORIGIN) =>
   defineAction({
     type: 'demo.call',
     name: 'Call',
     description: 'Calls the provider.',
     auth: scheme,
     props: {},
-    run: async ({ auth, http: client }) => (await client.get(`${ORIGIN}/me`, { auth })).data,
+    run: async ({ auth, http: client }) => (await client.get(`${origin}/me`, { auth })).data,
   });
 
 describe.each([
@@ -137,6 +139,14 @@ describe.each([
       expect((err as Error).message).toBe('HTTP 401: unknown api key [redacted]');
       expectScrubbed(err, [KEY]);
     }
+  });
+
+  it('when a Basic scheme takes the key as its username and the password is a long placeholder', async () => {
+    const fetchImpl = replying(() => fakeResponse(401, `unknown token ${KEY}`));
+    const credential: DirectCredential = { type: 'basic', username: KEY, password: 'api_token' };
+    const err = await failureOf(call(keyAsUsername, credential, fetchImpl));
+    expect((err as Error).message).toBe('HTTP 401: unknown token [redacted]');
+    expectScrubbed(err, [KEY]);
   });
 
   it('a Basic username is left alone when the password is the secret', async () => {
@@ -240,6 +250,11 @@ describe('an action that throws the key it was handed back never passes it on', 
           enumerable: false,
         }),
     ],
+    [
+      'an ActionError whose detail holds a symbol described by it',
+      (echo: string) =>
+        new ActionError({ code: 'provider_error', message: `rejected ${echo}`, detail: { s: Symbol(echo) } }),
+    ],
   ])('%s, from run or from an options loader', async (_kind, fail) => {
     const action = throwing(fail);
     expectScrubbed(await failureOf(action.execute({ auth: auth(), props: {}, http })), [KEY]);
@@ -307,14 +322,27 @@ describe('an action that throws the key it was handed back never passes it on', 
     }
   });
 
-  it('withholds a failure it cannot read at all rather than passing it on', async () => {
-    const action = throwing((echo) =>
-      Object.defineProperty(new Error('unread'), 'message', {
-        get: () => {
-          throw new Error(`no message for ${echo}`);
-        },
-      }),
-    );
+  it.each([
+    [
+      'a message getter that throws',
+      (echo: string) =>
+        Object.defineProperty(new Error('unread'), 'message', {
+          get: () => {
+            throw new Error(`no message for ${echo}`);
+          },
+        }),
+    ],
+    [
+      'a prototype that cannot be read',
+      (echo: string) =>
+        new Proxy(new Error('unread'), {
+          getPrototypeOf: () => {
+            throw new Error(`no prototype for ${echo}`);
+          },
+        }),
+    ],
+  ])('withholds a failure it cannot read at all (%s) rather than passing it on', async (_kind, fail) => {
+    const action = throwing(fail);
     for (const run of [
       () => action.execute({ auth: auth(), props: {}, http }),
       () => action.loadOptions('choice', { auth: auth(), http }),
@@ -397,6 +425,62 @@ describe('a trigger that throws the key it was handed back never passes it on', 
     expectScrubbed(await failureOf(run()), [KEY]);
   });
 
+  const badItem = (item: { id: string }): never => {
+    throw new Error(`bad item ${item.id}`);
+  };
+  const echoedItems = async ({ auth: handle, http: client }: { auth: AuthHandle; http: HttpClient }) => [
+    { id: await echoed(client, handle) },
+  ];
+
+  it.each([
+    [
+      "runPoll's dedupeKey",
+      () =>
+        defineTrigger({
+          type: 'demo.polled',
+          name: 'Polled',
+          description: 'Polls items keyed by what the provider echoed.',
+          auth: keyHeader,
+          props: {},
+          strategy: 'polling',
+          poll: echoedItems,
+          dedupeKey: badItem,
+        }).runPoll({ auth: auth(), props: {}, store: new MemoryStore(), http }),
+    ],
+    [
+      "handleRequest's dedupeKey",
+      () =>
+        defineTrigger({
+          type: 'demo.keyed',
+          name: 'Keyed',
+          description: 'Listens for items keyed by what the provider echoed.',
+          auth: keyHeader,
+          props: {},
+          strategy: 'webhook',
+          onRequest: echoedItems,
+          dedupeKey: badItem,
+        }).handleRequest({ ...hook, auth: auth(), request: { headers: {}, body: {} } }),
+    ],
+    [
+      "handleRequest's verify",
+      () =>
+        defineTrigger({
+          type: 'demo.verified',
+          name: 'Verified',
+          description: 'Listens for signed requests.',
+          auth: keyHeader,
+          props: {},
+          strategy: 'webhook',
+          verify: (request) => {
+            throw new Error(`unexpected payload ${JSON.stringify(request.body)}`);
+          },
+          onRequest: () => [],
+        }).handleRequest({ ...hook, auth: auth(), request: { headers: {}, body: { token: KEY } } }),
+    ],
+  ])('%s', async (_step, run) => {
+    expectScrubbed(await failureOf(run()), [KEY]);
+  });
+
   it('a dropdown the host loads through resolveOptions', async () => {
     const choosy = defineTrigger({
       type: 'demo.choosy',
@@ -462,5 +546,95 @@ describe('a host transport that supplies redact', () => {
       callAction(keyHeader).execute({ auth: createAuth(keyHeader, host), props: {}, http }),
     ).resolves.toEqual({ ok: true });
     expect(host.redact).not.toHaveBeenCalled();
+  });
+});
+
+describe('a host transport with no redact whose send throws its own error', () => {
+  const host = (thrown: Error): Transport => ({ kind: 'host', send: () => Promise.reject(thrown) });
+  const get = (thrown: Error) =>
+    failureOf(http.get(`${ORIGIN}/me`, { auth: createAuth(keyHeader, host(thrown)) }));
+
+  it('never passes on the request the error carried', async () => {
+    const err = await get(
+      Object.assign(new Error('Request failed with status code 401'), {
+        config: { headers: { 'x-api-key': KEY } },
+        response: { data: { error: `bad key ${KEY}` } },
+      }),
+    );
+    expect(err).toMatchObject({ code: 'transport_unreachable' });
+    expect(seen(err)).not.toContain(KEY);
+  });
+
+  it('keeps what diagnoses it: name, message, code, errno, syscall and the same of its cause', async () => {
+    const reason = Object.assign(new Error('connect ECONNREFUSED 203.0.113.9:443'), {
+      code: 'ECONNREFUSED',
+      errno: -61,
+      syscall: 'connect',
+      request: { headers: { 'x-api-key': KEY } },
+    });
+    const err = await get(
+      Object.assign(new TypeError('fetch failed', { cause: reason }), { config: { apiKey: KEY } }),
+    );
+    expect(err).toMatchObject({ code: 'transport_unreachable', message: 'TypeError: fetch failed' });
+    const cause = (err as Error).cause as Error;
+    expect(cause).toBeInstanceOf(Error);
+    expect(cause).toMatchObject({ name: 'TypeError', message: 'fetch failed' });
+    expect(cause).not.toHaveProperty('config');
+    expect(cause.stack).toMatch(/^TypeError: fetch failed\n\s+at /);
+    expect(cause.cause).toMatchObject({
+      name: 'Error',
+      message: 'connect ECONNREFUSED 203.0.113.9:443',
+      code: 'ECONNREFUSED',
+      errno: -61,
+      syscall: 'connect',
+    });
+    expect(cause.cause).not.toHaveProperty('request');
+    expect(seen(err)).not.toContain(KEY);
+  });
+});
+
+type Unscoped<T> = T extends unknown ? Omit<T, 'origins'> : never;
+
+describe('a credential saved with whitespace around it, which the network hop sends trimmed', () => {
+  let server: LoopbackServer;
+  let base: string;
+
+  beforeAll(async () => {
+    server = await startLoopbackServer((req, res) => {
+      const query = new URL(req.url ?? '/', 'http://loopback').searchParams.get('sig')?.trim();
+      const sent = query ?? req.headers['x-api-key'] ?? req.headers.authorization?.replace(/^Bearer +/, '');
+      res.writeHead(401, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ message: `invalid api key ${String(sent)}` }));
+    });
+    base = `http://127.0.0.1:${server.port}`;
+  });
+
+  afterAll(() => server.close());
+
+  it.each<[string, Unscoped<Exclude<AuthScheme, NoneScheme>>, DirectCredential]>([
+    [
+      'an apiKey header saved with a trailing newline',
+      { type: 'apiKey', in: 'header', name: 'x-api-key' },
+      apiKey(`${KEY}\n`),
+    ],
+    ['a bearer token saved with spaces around it', { type: 'oauth2' }, { type: 'bearer', token: ` ${KEY} ` }],
+    [
+      'a query apiKey saved with a trailing space that the provider trims',
+      { type: 'apiKey', in: 'query', name: 'sig' },
+      apiKey(`${KEY} `),
+    ],
+  ])('%s', async (_label, unscoped, credential) => {
+    const scheme: AuthScheme = { ...unscoped, origins: [base] };
+    const err = await withAllowedHosts('127.0.0.1', () =>
+      failureOf(
+        callAction(scheme, base).execute({ auth: createDirectAuth(scheme, credential), props: {}, http }),
+      ),
+    );
+    expect(err).toMatchObject({
+      code: 'http_error',
+      status: 401,
+      message: 'HTTP 401: invalid api key [redacted]',
+    });
+    expectScrubbed(err, [KEY]);
   });
 });
