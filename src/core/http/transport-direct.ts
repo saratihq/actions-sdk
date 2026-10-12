@@ -197,7 +197,9 @@ function spellings(secret: string): Array<[text: string, pattern: string]> {
 
 function appliedSecrets(credential: DirectCredential, scheme: AuthScheme): RegExp | null {
   // The wire trims a header value's surrounding whitespace, and a provider may trim what it echoes.
-  const secrets = credentialSecrets(credential, scheme).flatMap((secret) => [secret, secret.trim()]);
+  const secrets = credentialSecrets(credential, scheme)
+    .filter(isSecret)
+    .flatMap((secret) => [secret, secret.trim()]);
   const patterns = new Map(secrets.filter(isSecret).flatMap(spellings));
   if (patterns.size === 0) return null;
   // Longest first, so a spelling that contains another is redacted whole.

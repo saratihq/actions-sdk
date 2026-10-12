@@ -137,20 +137,22 @@ Whatever the client, an action, a dropdown's options loader (`resolveOptions`) o
 connection's credential scrubbed out of its message, name, stack, `detail` (keys and values) and every
 cause, in each spelling a request or an echo carries it (as given and trimmed of surrounding whitespace,
 URL-encoded with either case of hex, JSON-escaped, and Basic's base64 `user:pass`), on top of the
-token-shaped patterns `redactSecrets` removes. A Basic username counts as the credential when the scheme
-sets `keyAsUsername: true`, for an API that takes the key as the username whatever the password
-(`<key>:api_token`), or when the password is blank or a placeholder shorter than four characters (Stripe,
-Freshdesk). A credential value shorter than four characters, or all whitespace, is left alone, so it can't
-eat ordinary words, and an `ActionError`'s `code`, `status` and `retryable` are kept as they are. What
-leaves is a scrubbed copy: an `ActionError` stays one, any other error becomes an `Error` with the same
-(scrubbed) name, and a value that can't be scrubbed or read (a class instance or a symbol hung on an error,
-a getter that throws) is dropped. An error a transport throws that isn't an `ActionError` becomes the
-failure's `cause` cut down to its name, message, stack, `code`, `errno` and `syscall`, and the same of its
-own cause, so the request it carried (an axios-style `config` or `response`) is never passed on. Scrubbing
-fails closed: a failure it cannot walk at all leaves as an `ActionError` carrying only its scrubbed message
-and, if it was one, its `code`, `status` and `retryable`, or as code `unknown` with message `[redacted]` when
-not even that can be read; text a transport's `redact` throws on becomes `[redacted]`. A host transport that
-attaches a secret of its own implements `Transport.redact(text)` to have it scrubbed too.
+token-shaped patterns `redactSecrets` removes. No other encoding is derived, so a value a `custom`
+scheme's `apply` builds from the credential (a base64 of its own, or a signature) is not scrubbed. A
+Basic username counts as the credential when the scheme sets `keyAsUsername: true`, for an API that takes
+the key as the username whatever the password (`<key>:api_token`), or when the password is blank or a
+placeholder shorter than four characters (Stripe, Freshdesk). A credential value shorter than four
+characters, or all whitespace, is left alone, so it can't eat ordinary words, and an `ActionError`'s
+`code`, `status` and `retryable` are kept as they are. What leaves is a scrubbed copy: an `ActionError`
+stays one, any other error becomes an `Error` with the same (scrubbed) name, and a value that can't be
+scrubbed or read (a class instance or a symbol hung on an error, a getter that throws) is dropped. An
+error a transport throws that isn't an `ActionError` becomes the failure's `cause` cut down to its name,
+message, stack, `code`, `errno` and `syscall`, and the same of its own cause, so the request it carried
+(an axios-style `config` or `response`) is never passed on. Scrubbing fails closed: a failure it cannot
+walk at all leaves as an `ActionError` carrying only its scrubbed message and, if it was one, its `code`,
+`status` and `retryable`, or as code `unknown` with message `[redacted]` when not even that can be read;
+text a transport's `redact` throws on becomes `[redacted]`. A host transport that attaches a secret of
+its own implements `Transport.redact(text)` to have it scrubbed too.
 
 ## Testing
 

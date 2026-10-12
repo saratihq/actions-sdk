@@ -115,6 +115,18 @@ describe.each([
     expectScrubbed(err, [KEY]);
   });
 
+  it('when a fetch failure had its message cut through the key after its stack was read', async () => {
+    const fetchImpl: FetchLike = (input) => {
+      const failed = new TypeError(`request to ${String(input)} failed`);
+      void failed.stack;
+      failed.message = `request to ${String(input).slice(0, -12)}`;
+      return Promise.reject(failed);
+    };
+    const err = await failureOf(call(keyQuery, apiKey(KEY), fetchImpl));
+    expect(err).toMatchObject({ code: 'transport_unreachable' });
+    expectScrubbed(err, [KEY]);
+  });
+
   it('in every spelling a query param gives a key that needs encoding', async () => {
     const odd = 'sk live~1234!abcd';
     const fetchImpl: FetchLike = (input) =>
@@ -149,6 +161,24 @@ describe.each([
     expectScrubbed(err, [KEY]);
   });
 
+  it('when a Basic connection read from untyped JSON has its key as the username and no password', async () => {
+    const fetchImpl = replying(() => fakeResponse(401, `unknown api key ${KEY}`));
+    const credential = { type: 'basic', username: KEY } as unknown as DirectCredential;
+    const err = await failureOf(call(basicAuth, credential, fetchImpl));
+    expect((err as Error).message).toBe('HTTP 401: unknown api key [redacted]');
+    expectScrubbed(err, [KEY]);
+  });
+
+  it.each<[string, AuthScheme, unknown]>([
+    ['a bearer token that is null', { type: 'oauth2', origins: [ORIGIN] }, { type: 'bearer', token: null }],
+    ['an apiKey value that is a number', keyHeader, { type: 'apiKey', value: 12345678 }],
+  ])('still sends, as 0.2.0 did, with %s', async (_kind, scheme, credential) => {
+    const fetchImpl = jest.fn(replying(() => fakeResponse(401, 'nope')));
+    const err = await failureOf(call(scheme, credential as DirectCredential, fetchImpl));
+    expect(err).toMatchObject({ code: 'http_error', status: 401, message: 'HTTP 401: nope' });
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
   it('a Basic username is left alone when the password is the secret', async () => {
     const fetchImpl = replying(() => fakeResponse(401, 'no access for me@acme.test'));
     const credential: DirectCredential = { type: 'basic', username: 'me@acme.test', password: KEY };
@@ -166,7 +196,7 @@ describe.each([
     expect((err as Error).message).toBe('HTTP 401: bad key [redacted] / [redacted] / [redacted]');
   });
 
-  it('a credential inside a machine field leaves the code, the name and the stack frames alone', async () => {
+  it('a credential inside a machine field leaves the code, the name and the stack header alone', async () => {
     const fetchImpl = replying(() => fakeResponse(401, 'nope'));
     const header = /^ActionError: HTTP 401: nope\n {4}at /;
     const coded = await failureOf(call(keyHeader, apiKey('http'), fetchImpl));
@@ -235,6 +265,15 @@ describe('an action that throws the key it was handed back never passes it on', 
           url: `${ORIGIN}/x?sig=${echo}`,
           response: new Headers({ authorization: echo }),
         }),
+    ],
+    [
+      'an Error whose message was cut through it after its stack was read',
+      (echo: string) => {
+        const cut = new Error(`upstream said ${echo} and more`);
+        void cut.stack;
+        cut.message = `upstream said ${echo.slice(0, 12)}`;
+        return cut;
+      },
     ],
     ['a thrown string', (echo: string) => `failed with ${echo}`],
     [

@@ -362,7 +362,7 @@ class Scrubber {
     const message = String(err.message);
     if (name !== copy.name) copy.name = this.clean(name);
     copy.message = this.clean(message);
-    if (typeof err.stack === 'string') copy.stack = this.stack(err.stack, header(name, message), copy);
+    if (typeof err.stack === 'string') copy.stack = this.stack(err.stack, name, copy);
     for (const key of ['cause', 'errors'] as const) {
       const value = key in err ? read(err, key) : UNREADABLE;
       if (value === UNREADABLE) continue;
@@ -371,9 +371,8 @@ class Scrubber {
     return copy;
   }
 
-  // The header is rebuilt from the copy's name and message, so a class name kept verbatim stays intact in it.
-  private stack(stack: string, raw: string, copy: Error): string {
-    if (!stack.startsWith(raw)) return this.clean(stack);
-    return header(copy.name, copy.message) + this.clean(stack.slice(raw.length));
+  // All after the name is scrubbed as one: the header may still hold a message since cut through a secret.
+  private stack(stack: string, name: string, copy: Error): string {
+    return stack.startsWith(name) ? copy.name + this.clean(stack.slice(name.length)) : this.clean(stack);
   }
 }
