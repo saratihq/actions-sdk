@@ -1,7 +1,7 @@
 import { defineAction } from '../../core/action';
 import type { JsonValue } from '../../core/http/types';
 import { checkbox, dropdown, number, shortText } from '../../core/props';
-import { instanceUrlProp, jiraAuth, resolveJiraBase, textToAdf } from './common';
+import { instanceUrlProp, jiraAuth, jiraJson, resolveJiraBase, textToAdf } from './common';
 
 /** Public types — stable public catalog ids. */
 export const ADD_COMMENT_TYPE = 'jira.add_comment';
@@ -54,7 +54,7 @@ export const addComment = defineAction({
       `${base}/issue/${encodeURIComponent(props.issueIdOrKey)}/comment`,
       { auth, body: { body } },
     );
-    return res.data;
+    return jiraJson(res);
   },
 });
 
@@ -91,6 +91,7 @@ export const listComments = defineAction({
         },
       },
     );
-    return { comments: res.data.comments, total: res.data.total };
+    const page = jiraJson(res);
+    return { comments: page.comments, total: page.total };
   },
 });

@@ -9,6 +9,7 @@ export const HUBSPOT_API_BASE = 'https://api.hubapi.com';
 /** OAuth or private-app token, both as a Bearer header — one `apiKey` scheme so BYO and managed share code. */
 export const hubspotAuth: ApiKeyScheme = {
   type: 'apiKey',
+  origins: ['https://api.hubapi.com'],
   in: 'header',
   name: 'Authorization',
   prefix: 'Bearer ',

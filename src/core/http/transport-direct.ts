@@ -1,17 +1,22 @@
+import { createHash } from 'node:crypto';
 import { isNativeError } from 'node:util/types';
 
 import type { AuthScheme, DirectCredential } from '../auth';
 import { ActionError, transportFailure } from '../errors';
+import { type CredentialScope, credentialScope } from './credential-scope';
 import { encodeForm } from './form';
 import { guardedFetch } from './guarded-fetch';
 import { encodeMultipart } from './multipart';
 import {
   appendQuery,
+  FORM,
   type FetchLike,
   isFormBody,
   isMultipartBody,
+  MULTIPART,
   type NormalizedRequest,
   type NormalizedResponse,
+  type RequestBody,
   type Transport,
 } from './types';
 
@@ -28,21 +33,33 @@ export class DirectTransport implements Transport {
   private readonly scheme: AuthScheme;
   private readonly credential: DirectCredential;
   private readonly fetchImpl: FetchLike;
+  private readonly scope: CredentialScope | null;
 
   constructor(options: DirectTransportOptions) {
     this.scheme = options.scheme;
     this.credential = options.credential;
     this.fetchImpl = options.fetchImpl ?? guardedFetch;
+    this.scope = credentialScope(options.scheme);
   }
 
   async send(request: NormalizedRequest): Promise<NormalizedResponse> {
-    const prepared = this.applyAuth(request);
-    const wireBody = this.encodeBody(prepared);
+    const custom = this.scheme.type === 'custom';
+    const bodyBefore = custom ? bodyFingerprint(request.body) : undefined;
+    const prepared = await this.applyAuth(request, bodyBefore);
+    if (this.scope) prepared.url = this.scope.admit(prepared.url).href;
+    const credentialHeaders = changedHeaders(request.headers, prepared.headers);
+    const credentialParams = changedParams(request.url, prepared.url);
+    const bodyAfter = custom ? bodyFingerprint(prepared.body) : undefined;
+    const credentialBody = custom && bodyAfter !== bodyBefore;
+    const wireBody = this.encodeBody(prepared, bodyAfter);
     const res = await this.fetchImpl(prepared.url, {
       method: prepared.method,
       headers: prepared.headers,
       ...(wireBody !== undefined ? { body: wireBody } : {}),
       ...(prepared.signal ? { signal: prepared.signal } : {}),
+      ...(credentialHeaders.length > 0 ? { credentialHeaders } : {}),
+      ...(credentialParams.length > 0 ? { credentialParams } : {}),
+      ...(credentialBody ? { credentialBody } : {}),
     });
 
     const headers: Record<string, string> = {};
@@ -60,8 +77,8 @@ export class DirectTransport implements Transport {
     return { status: res.status, headers, data: parseBody(text, headers['content-type']) };
   }
 
-  /** Serialise the body for the wire and set its Content-Type on the already-copied `prepared.headers`. */
-  private encodeBody(prepared: NormalizedRequest): string | Buffer | undefined {
+  /** Serialise the body for the wire and set its Content-Type on the already-copied `prepared.headers`; a JSON body's fingerprint is its wire text. */
+  private encodeBody(prepared: NormalizedRequest, fingerprint?: string): string | Buffer | undefined {
     if (prepared.body === undefined) return undefined;
     if (isMultipartBody(prepared.body)) {
       const { body, contentType } = encodeMultipart(prepared.body);
@@ -72,11 +89,14 @@ export class DirectTransport implements Transport {
       prepared.headers['content-type'] = 'application/x-www-form-urlencoded';
       return encodeForm(prepared.body);
     }
-    return JSON.stringify(prepared.body);
+    return fingerprint ?? JSON.stringify(prepared.body);
   }
 
   /** Attach the credential to a COPY of the request (never mutate the caller's object). */
-  private applyAuth(request: NormalizedRequest): NormalizedRequest {
+  private async applyAuth(
+    request: NormalizedRequest,
+    bodyFingerprintBefore?: string,
+  ): Promise<NormalizedRequest> {
     const prepared: NormalizedRequest = { ...request, headers: { ...request.headers } };
     const cred = this.credential;
 
@@ -103,9 +123,14 @@ export class DirectTransport implements Transport {
           prepared.headers['authorization'] = `Basic ${encoded}`;
         }
         break;
-      case 'custom':
-        this.scheme.apply(prepared, cred);
+      case 'custom': {
+        const copy = prepared.body === undefined ? undefined : copyBody(prepared.body, bodyFingerprintBefore);
+        if (copy === undefined) delete prepared.body;
+        else prepared.body = copy;
+        const scheme = this.scheme;
+        await unlessAborted(() => scheme.apply(prepared, cred), prepared.signal);
         break;
+      }
       default: {
         // Exhaustiveness guard — a new scheme type must be handled explicitly.
         const _exhaustive: never = this.scheme;
@@ -129,6 +154,69 @@ async function readBody<T>(url: string, read: () => Promise<T>): Promise<T> {
     const reason = isNativeError(cause) ? cause : isNativeError(err) ? err : new Error(String(err));
     throw transportFailure(new URL(url).origin, reason, 'response');
   }
+}
+
+async function unlessAborted(start: () => unknown, signal: AbortSignal | undefined): Promise<void> {
+  const aborted = (): ActionError =>
+    new ActionError({
+      code: 'transport_timeout',
+      message: 'request aborted before it was sent',
+      retryable: false,
+    });
+  if (signal?.aborted) throw aborted();
+  const work = start();
+  if (!signal) return void (await work);
+  let onAbort = (): void => undefined;
+  const abort = new Promise<never>((_, reject) => {
+    onAbort = () => reject(aborted());
+    signal.addEventListener('abort', onAbort, { once: true });
+  });
+  try {
+    await Promise.race([abort, work]);
+  } finally {
+    signal.removeEventListener('abort', onAbort);
+  }
+}
+
+// apply() edits a copy taken through the wire form, so a retry or a reused body starts clean.
+function copyBody(body: RequestBody, fingerprint: string | undefined): RequestBody | undefined {
+  if (isMultipartBody(body)) {
+    return {
+      [MULTIPART]: true,
+      parts: body.parts.map((part) =>
+        part.type === 'file' ? { ...part, data: Buffer.from(part.data) } : { ...part },
+      ),
+    };
+  }
+  if (isFormBody(body))
+    return { [FORM]: true, fields: body.fields.map(([name, value]) => [name, value] as const) };
+  return fingerprint === undefined ? undefined : (JSON.parse(fingerprint) as RequestBody);
+}
+
+/** What a body would send: a JSON body's exact wire text, form fields, or multipart parts with each file's sha256. */
+function bodyFingerprint(body: RequestBody | undefined): string | undefined {
+  if (body === undefined) return undefined;
+  if (isMultipartBody(body)) {
+    return JSON.stringify(
+      body.parts.map((part) =>
+        part.type === 'file' ? { ...part, data: createHash('sha256').update(part.data).digest('hex') } : part,
+      ),
+    );
+  }
+  return JSON.stringify(isFormBody(body) ? body.fields : body);
+}
+
+function changedHeaders(before: Record<string, string>, after: Record<string, string>): string[] {
+  return Object.keys(after).filter((name) => after[name] !== before[name]);
+}
+
+function changedParams(before: string, after: string): string[] {
+  if (before === after) return [];
+  const was = new URL(before).searchParams;
+  const now = new URL(after).searchParams;
+  return [...new Set(now.keys())].filter(
+    (name) => was.getAll(name).join('\n') !== now.getAll(name).join('\n'),
+  );
 }
 
 /** Parse a response body: JSON when the content-type says so, else the raw text. */

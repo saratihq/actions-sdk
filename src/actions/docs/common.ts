@@ -7,6 +7,7 @@ export const DOCS_API_BASE = 'https://docs.googleapis.com/v1/documents';
 /** Docs authenticates with an OAuth2 bearer access token, attached by the transport. */
 export const docsAuth: OAuth2Scheme = {
   type: 'oauth2',
+  origins: ['https://docs.googleapis.com'],
   scopes: ['https://www.googleapis.com/auth/documents'],
 };
 

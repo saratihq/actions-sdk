@@ -324,11 +324,14 @@ describe('guardedFetch — request shape and failures', () => {
     const http = new HttpClient({ retry: { retries: 0 } });
     await withAllowedHosts('127.0.0.1', async () => {
       await http.get(`http://${base}/bearer`, {
-        auth: createDirectAuth({ type: 'oauth2' }, { type: 'bearer', token: 'tok_abcdefghij\n' }),
+        auth: createDirectAuth(
+          { type: 'oauth2', origins: [`http://${base}`] },
+          { type: 'bearer', token: 'tok_abcdefghij\n' },
+        ),
       });
       await http.get(`http://${base}/apikey`, {
         auth: createDirectAuth(
-          { type: 'apiKey', in: 'header', name: 'x-k' },
+          { type: 'apiKey', origins: [`http://${base}`], in: 'header', name: 'x-k' },
           { type: 'apiKey', value: 'sk_live_123\r\n' },
         ),
       });

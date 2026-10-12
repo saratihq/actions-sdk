@@ -2,7 +2,15 @@ import { defineAction } from '../../core/action';
 import { cursorInBody, paginate } from '../../core/http/pagination';
 import type { JsonValue } from '../../core/http/types';
 import { dropdown, json, longText, number, shortText } from '../../core/props';
-import { instanceUrlProp, jiraAuth, namedRef, projectRef, resolveJiraBase, textToAdf } from './common';
+import {
+  instanceUrlProp,
+  jiraAuth,
+  jiraJson,
+  namedRef,
+  projectRef,
+  resolveJiraBase,
+  textToAdf,
+} from './common';
 
 /** Public types — stable public catalog ids. */
 export const CREATE_ISSUE_TYPE = 'jira.create_issue';
@@ -126,7 +134,7 @@ export const createIssue = defineAction({
       auth,
       body: { fields },
     });
-    return res.data;
+    return jiraJson(res);
   },
 });
 
@@ -157,7 +165,7 @@ export const getIssue = defineAction({
       auth,
       query: { expand: props.expand },
     });
-    return res.data;
+    return jiraJson(res);
   },
 });
 
@@ -196,7 +204,7 @@ export const updateIssue = defineAction({
       query: { returnIssue: true },
       body: { fields },
     });
-    return res.data;
+    return jiraJson(res);
   },
 });
 
@@ -241,7 +249,7 @@ export const searchIssues = defineAction({
         maxResults: cap,
         fields: (fieldList && fieldList.length > 0 ? fieldList : DEFAULT_SEARCH_FIELDS).join(','),
       },
-      extractItems: (res) => (res.data as JiraSearchPage)?.issues ?? [],
+      extractItems: (res) => (jiraJson(res) as JiraSearchPage)?.issues ?? [],
       nextPage: searchNextPage,
       maxItems: cap,
     });

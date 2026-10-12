@@ -7,6 +7,7 @@ export const ZOOM_API_BASE = 'https://api.zoom.us/v2';
 /** OAuth2 bearer auth; scopes must stay in Zoom's GRANULAR form — a BYO own-client app cannot request the retiring classic names. */
 export const zoomAuth: OAuth2Scheme = {
   type: 'oauth2',
+  origins: ['https://api.zoom.us'],
   scopes: ['meeting:read:meeting', 'meeting:write:meeting', 'user:read:user', 'user:read:list_users:admin'],
 };
 

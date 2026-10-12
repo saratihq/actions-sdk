@@ -1,4 +1,5 @@
 import { type AuthHandle, type AuthScheme, createAuthHandle, type DirectCredential } from './auth';
+import { scopeCredential } from './http/credential-scope';
 import { type FetchLike, type Transport } from './http/types';
 import { DirectTransport } from './http/transport-direct';
 
@@ -18,5 +19,5 @@ export function createDirectAuth(
 
 /** Build a handle over a host-supplied {@link Transport} — the managed rail, where the SDK holds no provider secret. */
 export function createAuth(scheme: AuthScheme, transport: Transport): AuthHandle {
-  return createAuthHandle(scheme.type, transport);
+  return createAuthHandle(scheme.type, scopeCredential(scheme, transport));
 }

@@ -10,7 +10,12 @@ import {
 } from './generate-text';
 
 /** Anthropic authenticates with the raw key in `x-api-key` (no bearer prefix). */
-const claudeAuth: ApiKeyScheme = { type: 'apiKey', in: 'header', name: 'x-api-key' };
+export const claudeAuth: ApiKeyScheme = {
+  type: 'apiKey',
+  origins: ['https://api.anthropic.com'],
+  in: 'header',
+  name: 'x-api-key',
+};
 
 /** Anthropic has no `response_format`, so JSON output is requested via the system prompt. */
 function claudeSystem(input: GenerateInput): string | undefined {

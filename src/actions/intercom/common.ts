@@ -12,6 +12,7 @@ export const INTERCOM_HEADERS: Record<string, string> = { 'intercom-version': '2
 /** Intercom authenticates with an access token as a Bearer credential (BYO paste or managed OAuth). */
 export const intercomAuth: ApiKeyScheme = {
   type: 'apiKey',
+  origins: ['https://api.intercom.io'],
   in: 'header',
   name: 'Authorization',
   prefix: 'Bearer ',

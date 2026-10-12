@@ -2,7 +2,13 @@ import type { ApiKeyScheme } from '../../core/auth';
 import { chatCompletionBody, extractChatCompletionText, makeGenerateText, usageField } from './generate-text';
 
 /** Mistral authenticates with a bearer key in the `Authorization` header (OpenAI-shaped API). */
-const mistralAuth: ApiKeyScheme = { type: 'apiKey', in: 'header', name: 'Authorization', prefix: 'Bearer ' };
+export const mistralAuth: ApiKeyScheme = {
+  type: 'apiKey',
+  origins: ['https://api.mistral.ai'],
+  in: 'header',
+  name: 'Authorization',
+  prefix: 'Bearer ',
+};
 
 /** `mistral.generate_text` — generate text with a Mistral chat model. */
 export const mistralGenerateText = makeGenerateText({

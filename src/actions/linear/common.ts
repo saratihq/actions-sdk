@@ -9,7 +9,12 @@ import type { DropdownOption } from '../../core/props';
 export const LINEAR_GRAPHQL_URL = 'https://api.linear.app/graphql';
 
 /** Linear personal API keys attach as a bare `Authorization` value — no `Bearer` prefix. */
-export const linearAuth: ApiKeyScheme = { type: 'apiKey', in: 'header', name: 'Authorization' };
+export const linearAuth: ApiKeyScheme = {
+  type: 'apiKey',
+  origins: ['https://api.linear.app'],
+  in: 'header',
+  name: 'Authorization',
+};
 
 /** A GraphQL response envelope: `data` on success, `errors` on failure (still HTTP 200). */
 export interface GraphqlResponse<T> {

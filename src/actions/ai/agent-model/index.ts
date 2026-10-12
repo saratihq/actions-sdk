@@ -1,6 +1,10 @@
-import type { AuthHandle } from '../../../core/auth';
+import type { ApiKeyScheme, AuthHandle } from '../../../core/auth';
 import { ActionError } from '../../../core/errors';
 import type { HttpClient } from '../../../core/http/client';
+import { claudeAuth } from '../claude';
+import { geminiAuth } from '../gemini';
+import { mistralAuth } from '../mistral';
+import { openaiAuth } from '../openai';
 import { anthropicAgentAdapter } from './anthropic';
 import { mistralAgentAdapter, openaiAgentAdapter } from './chat-completions';
 import { geminiAgentAdapter } from './gemini';
@@ -39,6 +43,14 @@ export async function callAgentModel(
 
 /** The four provider adapters, exposed for targeted testing / advanced binding. */
 export const agentModelAdapters = ADAPTERS;
+
+/** The scheme each provider's model call authenticates with — the one its `generate_text` action declares. */
+export const agentModelAuth: Record<AgentProvider, ApiKeyScheme> = {
+  claude: claudeAuth,
+  openai: openaiAuth,
+  mistral: mistralAuth,
+  gemini: geminiAuth,
+};
 
 export { anthropicAgentAdapter, openaiAgentAdapter, mistralAgentAdapter, geminiAgentAdapter };
 export type {

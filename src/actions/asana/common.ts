@@ -9,6 +9,7 @@ export const ASANA_API_BASE = 'https://app.asana.com/api/1.0';
 /** OAuth2 token (managed) or a PAT (BYO) — both ride the same bearer, so one scheme serves both. */
 export const asanaAuth: OAuth2Scheme = {
   type: 'oauth2',
+  origins: ['https://app.asana.com'],
   scopes: ['default'],
 };
 

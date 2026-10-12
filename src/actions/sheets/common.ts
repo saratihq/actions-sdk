@@ -13,6 +13,7 @@ const SPREADSHEET_MIME = 'application/vnd.google-apps.spreadsheet';
 /** OAuth2 bearer auth: `spreadsheets` covers value reads/writes, `drive.readonly` backs the spreadsheet picker. */
 export const sheetsAuth: OAuth2Scheme = {
   type: 'oauth2',
+  origins: ['https://sheets.googleapis.com', 'https://www.googleapis.com'],
   scopes: ['https://www.googleapis.com/auth/spreadsheets', 'https://www.googleapis.com/auth/drive.readonly'],
 };
 

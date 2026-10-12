@@ -60,10 +60,15 @@ export const sendChannelMessage = defineAction({
   timeouts, and error normalization to a single shape `{ status, message, retryable }`.
 - **Auth** — an action declares an `AuthScheme` and receives an opaque `AuthHandle`. The
   credential is resolved behind the handle and is never readable by action code, so the same
-  action runs with direct (bring-your-own) or managed credentials with no branching.
+  action runs with direct (bring-your-own) or managed credentials with no branching. Each scheme
+  declares the origins its credential may be sent to, and a request to any other origin is refused
+  on both. On a direct connection a redirect never carries the credential to another origin either;
+  on a managed connection the broker follows redirects itself.
 
 See [`docs/writing-an-action.md`](docs/writing-an-action.md) and
-[`docs/writing-a-trigger.md`](docs/writing-a-trigger.md) for full walkthroughs.
+[`docs/writing-a-trigger.md`](docs/writing-a-trigger.md) for full walkthroughs. Upgrading from 0.1? Read
+[Upgrading to 0.2](https://github.com/saratihq/actions-sdk/blob/main/docs/writing-an-action.md#upgrading-to-02):
+every credentialed scheme now declares `origins`.
 
 ## Private addresses
 

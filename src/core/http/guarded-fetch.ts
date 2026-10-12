@@ -41,6 +41,10 @@ function withoutHeaders(
   return Object.fromEntries(Object.entries(headers ?? {}).filter(([name]) => !names.has(name.toLowerCase())));
 }
 
+function withoutParams(url: URL, names: readonly string[]): void {
+  for (const name of names) if (url.searchParams.has(name)) url.searchParams.delete(name);
+}
+
 function unsendable(origin: string, reason: string): ActionError {
   return new ActionError({
     code: 'invalid_input',
@@ -154,7 +158,7 @@ function redirectTarget(location: string, from: URL): URL {
 }
 
 // Fetch's own rewrite of a redirected request: 303 (and 301/302 after POST) becomes a body-less GET.
-function followUp(init: FetchInit, status: number, crossOrigin: boolean): FetchInit {
+function followUp(init: FetchInit, status: number, dropped: Set<string> | null): FetchInit {
   const method = (init.method ?? 'GET').toUpperCase();
   const toGet =
     (status === 303 && method !== 'GET' && method !== 'HEAD') ||
@@ -166,9 +170,7 @@ function followUp(init: FetchInit, status: number, crossOrigin: boolean): FetchI
         ...(init.signal ? { signal: init.signal } : {}),
       }
     : init;
-  return crossOrigin
-    ? { ...next, headers: withoutHeaders(next.headers, CROSS_ORIGIN_DROPPED_HEADERS) }
-    : next;
+  return dropped ? { ...next, headers: withoutHeaders(next.headers, dropped) } : next;
 }
 
 function namingRedirect(err: unknown, url: URL, from: string | undefined): unknown {
@@ -177,11 +179,16 @@ function namingRedirect(err: unknown, url: URL, from: string | undefined): unkno
     : err;
 }
 
-/** The SDK's network hop: fetch, except every dialled address must be public, every redirect hop is re-guarded, and Node's env proxy is honoured. */
+/** The SDK's network hop: fetch, except every dialled address must be public, every redirect hop is re-guarded, the credential never leaves its origin, and Node's env proxy is honoured. */
 export const guardedFetch: FetchLike = async (input, init = {}) => {
   let url = requestUrl(input);
-  let request = init;
+  let request: FetchInit = { ...init, headers: { ...init.headers } };
   let from: string | undefined;
+  const offOriginDropped = new Set([
+    ...CROSS_ORIGIN_DROPPED_HEADERS,
+    ...(init.credentialHeaders ?? []).map((name) => name.toLowerCase()),
+  ]);
+  let leftOrigin = false;
   for (let hops = 0; ; hops += 1) {
     let res: Response;
     try {
@@ -200,7 +207,16 @@ export const guardedFetch: FetchLike = async (input, init = {}) => {
       });
     }
     const next = redirectTarget(location, url);
-    request = followUp(request, res.status, next.origin !== url.origin);
+    leftOrigin ||= next.origin !== url.origin;
+    request = followUp(request, res.status, leftOrigin ? offOriginDropped : null);
+    if (leftOrigin && init.credentialBody && request.body !== undefined) {
+      throw new ActionError({
+        code: 'credential_scope',
+        message: `refusing to replay a credential-bearing body to ${next.origin} on a ${res.status} redirect`,
+        retryable: false,
+      });
+    }
+    if (leftOrigin) withoutParams(next, init.credentialParams ?? []);
     from = url.origin;
     url = next;
   }

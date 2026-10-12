@@ -17,6 +17,7 @@ export const todoistNextPage = cursorInBody({ cursorPath: ['next_cursor'], curso
 /** Declared `oauth2` because a managed access token and a BYO API token both ride as the same bearer. */
 export const todoistAuth: OAuth2Scheme = {
   type: 'oauth2',
+  origins: ['https://api.todoist.com'],
   scopes: ['data:read_write'],
 };
 

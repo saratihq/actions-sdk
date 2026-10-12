@@ -2,7 +2,10 @@ import type { OAuth2Scheme } from '../../core/auth';
 import { shortText } from '../../core/props';
 
 /** Salesforce authenticates with an OAuth2 bearer access token, attached by the transport. */
-export const salesforceAuth: OAuth2Scheme = { type: 'oauth2' };
+export const salesforceAuth: OAuth2Scheme = {
+  type: 'oauth2',
+  origins: ['https://*.my.salesforce.com', 'https://*.salesforce.mil', 'https://*.sfcrmproducts.cn'],
+};
 
 /** Root a REST data-API call at the org's instance + api version. */
 export function salesforceBaseUrl(instanceUrl: string, apiVersion: string): string {
@@ -13,7 +16,8 @@ export function salesforceBaseUrl(instanceUrl: string, apiVersion: string): stri
 export function instanceUrlProp() {
   return shortText<true>({
     label: 'Instance URL',
-    description: 'Your Salesforce instance, e.g. https://your-org.my.salesforce.com',
+    description:
+      "Your org's My Domain URL, e.g. https://your-org.my.salesforce.com (Government Cloud Plus – Defense: salesforce.mil; Salesforce on Alibaba Cloud: sfcrmproducts.cn).",
     required: true,
   });
 }

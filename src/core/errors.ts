@@ -13,6 +13,7 @@ export type ActionErrorCode =
   | 'invalid_input'
   | 'ssrf_blocked'
   | 'unresolvable_host'
+  | 'credential_scope'
   | 'auth_missing'
   | 'auth_unsupported'
   | 'transport_unreachable'
@@ -227,4 +228,13 @@ export function redactSecrets(text: string): string {
       .replace(/\b(bearer\s+)[A-Za-z0-9._~+/=-]{8,}/gi, '$1[redacted]')
       .replace(/\bxox[baprs]-[A-Za-z0-9-]{8,}/gi, '[redacted]')
   );
+}
+
+/** A copy of `err` safe to log: same name and stack frames, with secrets scrubbed from its message and stack. */
+export function redactedError(err: unknown): Error {
+  if (!(err instanceof Error)) return new Error(redactSecrets(String(err)));
+  const copy = new Error(redactSecrets(err.message));
+  copy.name = err.name;
+  if (err.stack !== undefined) copy.stack = redactSecrets(err.stack);
+  return copy;
 }
