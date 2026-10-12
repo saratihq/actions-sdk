@@ -428,6 +428,61 @@ describe('a credential never reaches a foreign origin — real sockets', () => {
     },
   );
 
+  it('keeps the error apply threw as the cause of the failure', async () => {
+    const thrown = new Error('signing key unavailable');
+    const failure = await withAllowedHosts('127.0.0.1', () =>
+      http.get(`${providerOrigin}/ok`, {
+        auth: failingApply(() => {
+          throw thrown;
+        }),
+      }),
+    ).catch((err: unknown) => err);
+    expect(failure).toMatchObject({
+      code: 'transport_unreachable',
+      message: 'Error: signing key unavailable',
+    });
+    expect((failure as ActionError).cause).toBe(thrown);
+  });
+
+  it('never calls apply for a request already aborted, so a rejecting signer cannot go unhandled', async () => {
+    const unhandled: unknown[] = [];
+    const onUnhandled = (reason: unknown): void => {
+      unhandled.push(reason);
+    };
+    process.on('unhandledRejection', onUnhandled);
+    try {
+      const apply = jest.fn(async () => {
+        await Promise.resolve();
+        throw new Error('signing key unavailable');
+      });
+      const controller = new AbortController();
+      controller.abort();
+      const transport = new DirectTransport({
+        scheme: { type: 'custom', origins: [providerOrigin], apply },
+        credential: { type: 'apiKey', value: SECRET },
+      });
+      await expect(
+        transport.send({
+          method: 'GET',
+          url: `${providerOrigin}/ok`,
+          headers: {},
+          signal: controller.signal,
+        }),
+      ).rejects.toMatchObject({ code: 'transport_timeout', message: 'request aborted before it was sent' });
+      await expect(
+        withAllowedHosts('127.0.0.1', () =>
+          http.get(`${providerOrigin}/ok`, { auth: failingApply(apply), signal: controller.signal }),
+        ),
+      ).rejects.toMatchObject({ code: 'transport_timeout', message: 'request aborted by caller' });
+      await new Promise((resolve) => setTimeout(resolve, 30));
+      expect(apply).not.toHaveBeenCalled();
+      expect(unhandled).toEqual([]);
+      expect(provider.hits).toHaveLength(0);
+    } finally {
+      process.off('unhandledRejection', onUnhandled);
+    }
+  });
+
   it('an ActionError thrown by apply keeps its code and is not retried when it says so', async () => {
     const calls = jest.fn(() => {
       throw new ActionError({ code: 'auth_missing', message: 'no signing key configured', retryable: false });

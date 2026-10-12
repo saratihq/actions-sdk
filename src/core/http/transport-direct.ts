@@ -127,7 +127,8 @@ export class DirectTransport implements Transport {
         const copy = prepared.body === undefined ? undefined : copyBody(prepared.body, bodyFingerprintBefore);
         if (copy === undefined) delete prepared.body;
         else prepared.body = copy;
-        await unlessAborted(this.scheme.apply(prepared, cred), prepared.signal);
+        const scheme = this.scheme;
+        await unlessAborted(() => scheme.apply(prepared, cred), prepared.signal);
         break;
       }
       default: {
@@ -155,22 +156,23 @@ async function readBody<T>(url: string, read: () => Promise<T>): Promise<T> {
   }
 }
 
-async function unlessAborted(work: unknown, signal: AbortSignal | undefined): Promise<void> {
+async function unlessAborted(start: () => unknown, signal: AbortSignal | undefined): Promise<void> {
   const aborted = (): ActionError =>
     new ActionError({
       code: 'transport_timeout',
       message: 'request aborted before it was sent',
       retryable: false,
     });
+  if (signal?.aborted) throw aborted();
+  const work = start();
   if (!signal) return void (await work);
-  if (signal.aborted) throw aborted();
   let onAbort = (): void => undefined;
   const abort = new Promise<never>((_, reject) => {
     onAbort = () => reject(aborted());
     signal.addEventListener('abort', onAbort, { once: true });
   });
   try {
-    await Promise.race([work, abort]);
+    await Promise.race([abort, work]);
   } finally {
     signal.removeEventListener('abort', onAbort);
   }

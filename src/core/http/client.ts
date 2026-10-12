@@ -118,6 +118,7 @@ export class HttpClient {
 
     let attempt = 0;
     for (;;) {
+      if (options.signal?.aborted) throw callerAborted();
       const { signal, expired, dispose } = withTimeout(timeoutMs, options.signal);
       const request: NormalizedRequest = {
         method,
@@ -132,6 +133,7 @@ export class HttpClient {
       let retryAfterMs: number | null = null;
       // Kept so a definitive transport failure keeps its real code instead of `transport_unreachable`.
       let thrown: ActionError | null = null;
+      let cause: unknown;
       try {
         // Raced so a transport that ignores the abort signal can never hang past `timeoutMs`.
         const response = await Promise.race([transport.send(request), expired]);
@@ -148,20 +150,14 @@ export class HttpClient {
       } catch (err) {
         // Transport-level throw (unreachable/timeout/aborted) already normalised.
         if (err instanceof ActionError) thrown = err;
+        else cause = err;
         failure =
           err instanceof ActionError ? err.toFailure() : { status: 0, message: String(err), retryable: true };
       } finally {
         dispose();
       }
 
-      if (options.signal?.aborted) {
-        throw new ActionError({
-          code: 'transport_timeout',
-          message: 'request aborted by caller',
-          status: 0,
-          retryable: false,
-        });
-      }
+      if (options.signal?.aborted) throw callerAborted();
 
       // A request that may have arrived (a lost connection, or a timeout while waiting) is resent only when resending is safe.
       const neverSent =
@@ -178,14 +174,26 @@ export class HttpClient {
           status: failure.status,
           retryable: failure.retryable,
           detail: failure.status === 0 ? undefined : safeDetail(failure),
+          cause,
         });
       }
 
       const wait = retryAfterMs ?? backoffDelay(attempt, this.retry);
-      await sleep(Math.min(wait, this.retry.maxDelayMs), options.signal);
+      await sleep(Math.min(wait, this.retry.maxDelayMs), options.signal).catch(() => {
+        throw callerAborted();
+      });
       attempt += 1;
     }
   }
+}
+
+function callerAborted(): ActionError {
+  return new ActionError({
+    code: 'transport_timeout',
+    message: 'request aborted by caller',
+    status: 0,
+    retryable: false,
+  });
 }
 
 /** Per-attempt timeout: a signal that fires on timeout/caller-abort, plus an `expired` promise that only ever rejects. */
@@ -215,19 +223,9 @@ function withTimeout(
   // A caller abort settles the race itself, so a transport that never looks at the signal can't hold the call open.
   const onCallerAbort = (): void => {
     controller.abort();
-    rejectExpired(
-      new ActionError({
-        code: 'transport_timeout',
-        message: 'request aborted by caller',
-        status: 0,
-        retryable: false,
-      }),
-    );
+    rejectExpired(callerAborted());
   };
-  if (caller) {
-    if (caller.aborted) onCallerAbort();
-    else caller.addEventListener('abort', onCallerAbort, { once: true });
-  }
+  caller?.addEventListener('abort', onCallerAbort, { once: true });
   const dispose = (): void => {
     if (timer) clearTimeout(timer);
     caller?.removeEventListener('abort', onCallerAbort);

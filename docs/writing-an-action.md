@@ -103,8 +103,12 @@ site when `instanceUrl` matched none of its sites; 0.2 refuses. A saved value th
 of one of the token's sites must be corrected, or cleared when the token reaches a single site.
 
 A `custom` scheme's `apply` may now be async: whatever it returns is awaited before anything is sent, so
-anything it awaits delays every request until it settles. Throw an `ActionError` from it to choose the
-code and whether the call is retried; any other error is retried like a failure to connect.
+anything it awaits delays every request until it settles. On a caller abort or a timeout the request is
+abandoned without waiting for `apply` — it is not cancelled, and a retry calls it again — so pass
+`request.signal` to anything it awaits. Throw an `ActionError` from it to choose the code; its
+`retryable: true` retries an idempotent call, but a `POST` or `PATCH` only when its `status` is `0` and the
+code isn't `transport_timeout` or `transport_interrupted`. Any other error is retried like a failure to
+connect.
 
 ## HTTP client
 
