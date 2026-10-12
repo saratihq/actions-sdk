@@ -45,9 +45,20 @@ function invalidInstanceUrl(message: string): ActionError {
   });
 }
 
+const CLOUD_EXAMPLES =
+  'https://your-domain.atlassian.net, https://your-domain.jira.com or https://your-domain.atlassian-us-gov-mod.net';
+
+function asHttps(instanceUrl: string): { url: URL | null; schemeless: boolean } {
+  const trimmed = instanceUrl.trim();
+  const schemeless = !/^(https?:|[a-z][a-z0-9+.-]*:\/\/)/i.test(trimmed);
+  const url = parsed(schemeless ? `https://${trimmed}` : trimmed);
+  if (url?.protocol === 'http:') url.protocol = 'https:';
+  return { url, schemeless };
+}
+
 /** Classify a site before any request: its origin, and the gateway of its cloud — so a credential never crosses clouds. */
 function classifySite(instanceUrl: string): { origin: string; gateway: string } {
-  const url = parsed(instanceUrl);
+  const { url, schemeless } = asHttps(instanceUrl);
   const cloud =
     url &&
     url.protocol === 'https:' &&
@@ -59,7 +70,9 @@ function classifySite(instanceUrl: string): { origin: string; gateway: string } 
       : undefined;
   if (!url || !cloud) {
     throw invalidInstanceUrl(
-      `instanceUrl "${instanceUrl}" is not a Jira Cloud site — use e.g. https://your-domain.atlassian.net, https://your-domain.jira.com or https://your-domain.atlassian-us-gov-mod.net`,
+      schemeless
+        ? `instanceUrl "${instanceUrl}" is not a Jira Cloud site address — use e.g. ${CLOUD_EXAMPLES}`
+        : `instanceUrl "${instanceUrl}" is not a Jira Cloud site — use e.g. ${CLOUD_EXAMPLES}`,
     );
   }
   return { origin: url.origin, gateway: cloud[1] };

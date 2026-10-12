@@ -1,6 +1,6 @@
-import type { AuthHandle, AuthScheme } from './auth';
+import { type AuthHandle, type AuthScheme, redactorOf } from './auth';
 import { type ManifestEntry, toManifestEntry } from './catalog';
-import { ActionError, normalizeError } from './errors';
+import { ActionError, normalizeError, scrubError } from './errors';
 import { HttpClient } from './http/client';
 import { credentialScope, scopeHandle } from './http/credential-scope';
 import { type DropdownResult, parseProps, type PropsSchema, type PropsValue, resolveOptions } from './props';
@@ -67,10 +67,11 @@ export function defineAction<TProps extends PropsSchema, TOutput>(
       try {
         return await def.run({ auth, props, http });
       } catch (err) {
-        // Guarantee the boundary contract: anything `run` throws leaves as one shape.
-        if (err instanceof ActionError) throw err;
-        const failure = normalizeError(err);
-        throw new ActionError({ code: 'unknown', ...failure, cause: err });
+        // Scrubbed before it is read, then wrapped, so anything `run` throws leaves as one shape.
+        const scrubbed = scrubError(err, redactorOf(auth));
+        throw scrubbed instanceof ActionError
+          ? scrubbed
+          : new ActionError({ code: 'unknown', ...normalizeError(scrubbed), cause: scrubbed });
       }
     },
     async loadOptions(propName, ctx): Promise<DropdownResult<unknown>> {

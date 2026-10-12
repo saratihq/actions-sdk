@@ -78,8 +78,10 @@ export function credentialScope(scheme: AuthScheme): CredentialScope | null {
 
 function scoped(scope: CredentialScope | null, transport: Transport): Transport {
   if (!scope) return transport;
+  const redact = transport.redact?.bind(transport);
   return {
     kind: transport.kind,
+    ...(redact ? { redact } : {}),
     async send(request: NormalizedRequest): Promise<NormalizedResponse> {
       return transport.send({ ...request, url: scope.admit(request.url).href });
     },

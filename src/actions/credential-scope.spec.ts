@@ -231,6 +231,14 @@ describe('instance URLs on each vendor-documented cloud domain are reached; any 
     ['https://acme.atlassian-us-gov-mod.net/jira', GOV_GATEWAY, 'https://acme.atlassian-us-gov-mod.net'],
     ['https://acme.atlassian.net/browse/ENG-1', GATEWAY, 'https://acme.atlassian.net'],
     ['https://ACME.atlassian.net:443/', GATEWAY, 'https://acme.atlassian.net'],
+    ['acme.atlassian.net', GATEWAY, 'https://acme.atlassian.net'],
+    ['acme.atlassian.net:443', GATEWAY, 'https://acme.atlassian.net'],
+    ['http://acme.atlassian.net', GATEWAY, 'https://acme.atlassian.net'],
+    ['https:acme.atlassian.net', GATEWAY, 'https://acme.atlassian.net'],
+    ['https:/acme.atlassian.net', GATEWAY, 'https://acme.atlassian.net'],
+    ['HTTPS:\\\\acme.atlassian.net', GATEWAY, 'https://acme.atlassian.net'],
+    ['http:acme.atlassian.net', GATEWAY, 'https://acme.atlassian.net'],
+    ['acme.atlassian-us-gov-mod.net', GOV_GATEWAY, 'https://acme.atlassian-us-gov-mod.net'],
   ] as const)(
     'jira instanceUrl %s: an API-token connection goes straight to the site; a managed one asks %s which site it is',
     async (instanceUrl, gateway, site) => {
@@ -429,9 +437,6 @@ describe('instance URLs on each vendor-documented cloud domain are reached; any 
   });
 
   it.each([
-    'acme.atlassian-us-gov-mod.net',
-    'acme.atlassian.net:443',
-    'http://acme.atlassian.net',
     'https://acme.atlassian.net:8443',
     'https://user@acme.atlassian.net',
     'https://acme.atlassian.net.evil.com',
@@ -465,6 +470,26 @@ describe('instance URLs on each vendor-documented cloud domain are reached; any 
     }
     expect(urls).toEqual([]);
     expect(broker.requests).toEqual([]);
+  });
+
+  it.each([
+    ['jira.acme-corp.example', 'is not a Jira Cloud site address —'],
+    ['acme.atlassian.net:8443', 'is not a Jira Cloud site address —'],
+    ['https://jira.acme-corp.example', 'is not a Jira Cloud site —'],
+    ['https:/jira.acme-corp.example', 'is not a Jira Cloud site —'],
+    ['ftp://acme.atlassian.net', 'is not a Jira Cloud site —'],
+  ])('jira instanceUrl %j is refused saying what is wrong with it', async (instanceUrl, says) => {
+    const { urls, fetchImpl } = recorder(() => json({}));
+    await expect(
+      getIssue.execute({
+        auth: createDirectAuth(jiraAuth, basic, { fetchImpl }),
+        props: { instanceUrl, issueIdOrKey: 'ENG-1' },
+      }),
+    ).rejects.toMatchObject({
+      code: 'invalid_input',
+      message: expect.stringContaining(`instanceUrl "${instanceUrl}" ${says}`),
+    });
+    expect(urls).toEqual([]);
   });
 
   it.each([undefined, '', '   '])(

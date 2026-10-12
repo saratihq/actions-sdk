@@ -230,11 +230,149 @@ export function redactSecrets(text: string): string {
   );
 }
 
-/** A copy of `err` safe to log: same name and stack frames, with secrets scrubbed from its message and stack. */
+const REDACTED = '[redacted]';
+
+/** `text` with a transport's own `redact` applied, then {@link redactSecrets}; text `redact` throws on is redacted whole. */
+export function scrubText(text: string, redact?: (text: string) => string): string {
+  try {
+    return redactSecrets(redact ? redact(text) : text);
+  } catch {
+    return REDACTED;
+  }
+}
+
+/** A copy of `err` safe to log: its message, stack, detail and every cause it wraps, scrubbed by {@link scrubText}. */
+export function scrubError(err: unknown, redact?: (text: string) => string): unknown {
+  const clean = (text: string): string => scrubText(text, redact);
+  try {
+    return new Scrubber(clean).value(err);
+  } catch {
+    return withheld(err, clean);
+  }
+}
+
+/** A raw failure cut to its name, message, stack, `code`, `errno`, `syscall` and the same of its cause, then scrubbed: what diagnoses it, never the request it carried. */
 export function redactedError(err: unknown): Error {
-  if (!(err instanceof Error)) return new Error(redactSecrets(String(err)));
-  const copy = new Error(redactSecrets(err.message));
-  copy.name = err.name;
-  if (err.stack !== undefined) copy.stack = redactSecrets(err.stack);
+  try {
+    return scrubError(diagnostic(err, new Set())) as Error;
+  } catch {
+    return new Error(REDACTED);
+  }
+}
+
+const DIAGNOSTIC_FIELDS = ['code', 'errno', 'syscall'];
+
+function diagnostic(err: unknown, seen: Set<Error>): Error {
+  if (!(err instanceof Error)) return new Error(String(err));
+  seen.add(err);
+  const text = (key: string): string | undefined => {
+    const value = read(err, key);
+    return typeof value === 'string' ? value : undefined;
+  };
+  const copy = new Error(text('message') ?? '');
+  copy.name = text('name') ?? copy.name;
+  copy.stack = text('stack') ?? header(copy.name, copy.message);
+  for (const key of DIAGNOSTIC_FIELDS) {
+    const value = read(err, key);
+    if (typeof value === 'string' || typeof value === 'number') Object.assign(copy, { [key]: value });
+  }
+  const cause = read(err, 'cause');
+  if (cause instanceof Error && !seen.has(cause)) copy.cause = diagnostic(cause, seen);
   return copy;
+}
+
+// Fails closed: what the scrubber cannot walk leaves as its scrubbed message and an ActionError's machine fields.
+function withheld(err: unknown, clean: (text: string) => string): ActionError {
+  try {
+    const shape =
+      err instanceof ActionError
+        ? { code: err.code, status: err.status, retryable: err.retryable }
+        : { code: 'unknown' as const, retryable: false };
+    return new ActionError({ ...shape, message: scrubbedMessage(err, clean) });
+  } catch {
+    return new ActionError({ code: 'unknown', message: REDACTED, retryable: false });
+  }
+}
+
+function scrubbedMessage(err: unknown, clean: (text: string) => string): string {
+  try {
+    return clean(String(err instanceof Error ? err.message : err));
+  } catch {
+    return REDACTED;
+  }
+}
+
+const UNREADABLE = Symbol('unreadable');
+const ERROR_FIELDS = new Set(['name', 'message', 'stack', 'cause', 'errors']);
+const ACTION_ERROR_FIELDS = new Set([...ERROR_FIELDS, 'code', 'status', 'retryable']);
+
+function read(from: object, key: string): unknown {
+  try {
+    return (from as Record<string, unknown>)[key];
+  } catch {
+    return UNREADABLE;
+  }
+}
+
+function header(name: string, message: string): string {
+  return message ? `${name}: ${message}` : name;
+}
+
+// Keeps strings (scrubbed), primitives, arrays, plain objects and errors; drops anything else, and any entry it cannot read.
+class Scrubber {
+  private readonly copies = new Map<object, object>();
+
+  constructor(private readonly clean: (text: string) => string) {}
+
+  value(value: unknown): unknown {
+    if (typeof value === 'string') return this.clean(value);
+    if (typeof value === 'function' || typeof value === 'symbol') return undefined;
+    if (typeof value !== 'object' || value === null) return value;
+    const copied = this.copies.get(value);
+    if (copied) return copied;
+    if (value instanceof Error) return this.error(value);
+    if (Array.isArray(value)) return this.fill(value, [] as unknown[]);
+    const proto: unknown = Object.getPrototypeOf(value);
+    return proto === Object.prototype || proto === null ? this.fill(value, {}) : undefined;
+  }
+
+  private fill<T extends object>(from: object, into: T, skip?: ReadonlySet<string>): T {
+    this.copies.set(from, into);
+    for (const key of Object.keys(from)) {
+      if (skip?.has(key)) continue;
+      const entry = read(from, key);
+      if (entry === UNREADABLE) continue;
+      Object.defineProperty(into, this.clean(key), {
+        value: this.value(entry),
+        enumerable: true,
+        writable: true,
+        configurable: true,
+      });
+    }
+    return into;
+  }
+
+  private error(err: Error): Error {
+    const copy =
+      err instanceof ActionError
+        ? new ActionError({ code: err.code, status: err.status, retryable: err.retryable, message: '' })
+        : new Error('');
+    this.fill(err, copy, copy instanceof ActionError ? ACTION_ERROR_FIELDS : ERROR_FIELDS);
+    const name = String(err.name);
+    const message = String(err.message);
+    if (name !== copy.name) copy.name = this.clean(name);
+    copy.message = this.clean(message);
+    if (typeof err.stack === 'string') copy.stack = this.stack(err.stack, name, copy);
+    for (const key of ['cause', 'errors'] as const) {
+      const value = key in err ? read(err, key) : UNREADABLE;
+      if (value === UNREADABLE) continue;
+      Object.defineProperty(copy, key, { value: this.value(value), writable: true, configurable: true });
+    }
+    return copy;
+  }
+
+  // All after the name is scrubbed as one: the header may still hold a message since cut through a secret.
+  private stack(stack: string, name: string, copy: Error): string {
+    return stack.startsWith(name) ? copy.name + this.clean(stack.slice(name.length)) : this.clean(stack);
+  }
 }

@@ -1,6 +1,6 @@
-import type { AuthHandle, AuthScheme } from './auth';
+import { type AuthHandle, type AuthScheme, redactorOf } from './auth';
 import { type ManifestEntry, toManifestEntry } from './catalog';
-import { ActionError } from './errors';
+import { ActionError, scrubError } from './errors';
 import { HttpClient } from './http/client';
 import { type CredentialScope, credentialScope, scopeHandle } from './http/credential-scope';
 import type { JsonValue } from './http/types';
@@ -194,6 +194,34 @@ export function defineTrigger<TProps extends PropsSchema, TItem>(
     : buildWebhookTrigger(def, manifest, scope);
 }
 
+// The items whose key isn't remembered yet, and the remembered keys with theirs in front, capped.
+async function unseen<TItem>(
+  store: TriggerStore,
+  items: TItem[],
+  keyOf: (item: TItem) => string,
+): Promise<{ fresh: TItem[]; remembered: string[] }> {
+  const seen = (await store.get<string[]>('seen')) ?? [];
+  const seenSet = new Set(seen);
+  const fresh: TItem[] = [];
+  const freshKeys: string[] = [];
+  for (const item of items) {
+    const key = keyOf(item);
+    if (seenSet.has(key)) continue;
+    seenSet.add(key);
+    fresh.push(item);
+    freshKeys.push(key);
+  }
+  return { fresh, remembered: [...freshKeys, ...seen].slice(0, DEDUPE_CAP) };
+}
+
+async function scrubbed<T>(auth: AuthHandle, work: () => T | Promise<T>): Promise<T> {
+  try {
+    return await work();
+  } catch (err) {
+    throw scrubError(err, redactorOf(auth));
+  }
+}
+
 function buildPollingTrigger<TProps extends PropsSchema, TItem>(
   def: PollingTriggerDefinition<TProps, TItem>,
   manifest: () => ManifestEntry,
@@ -202,32 +230,25 @@ function buildPollingTrigger<TProps extends PropsSchema, TItem>(
   return {
     ...def,
     async runPoll(input: PollInput): Promise<PollResult<TItem>> {
-      const props = parseProps(def.props, input.props);
-      const http = input.http ?? new HttpClient();
-      const lastPolledAt = await input.store.get<string>('lastPolledAt');
-      const items = await def.poll({
-        auth: scopeHandle(scope, input.auth),
-        props,
-        http,
-        store: input.store,
-        ...(lastPolledAt ? { lastPolledAt } : {}),
-      });
+      return scrubbed(input.auth, async () => {
+        const props = parseProps(def.props, input.props);
+        const http = input.http ?? new HttpClient();
+        const lastPolledAt = await input.store.get<string>('lastPolledAt');
+        const auth = scopeHandle(scope, input.auth);
+        const items = await def.poll({
+          auth,
+          props,
+          http,
+          store: input.store,
+          ...(lastPolledAt ? { lastPolledAt } : {}),
+        });
 
-      const seen = (await input.store.get<string[]>('seen')) ?? [];
-      const seenSet = new Set(seen);
-      const fresh: TItem[] = [];
-      const freshKeys: string[] = [];
-      for (const item of items) {
-        const key = def.dedupeKey(item);
-        if (seenSet.has(key)) continue;
-        seenSet.add(key);
-        fresh.push(item);
-        freshKeys.push(key);
-      }
-      const polledAt = new Date().toISOString();
-      await input.store.set('seen', [...freshKeys, ...seen].slice(0, DEDUPE_CAP));
-      await input.store.set('lastPolledAt', polledAt);
-      return { events: fresh, polledAt };
+        const { fresh, remembered } = await unseen(input.store, items, def.dedupeKey.bind(def));
+        const polledAt = new Date().toISOString();
+        await input.store.set('seen', remembered);
+        await input.store.set('lastPolledAt', polledAt);
+        return { events: fresh, polledAt };
+      });
     },
     toManifest: manifest,
   };
@@ -242,39 +263,44 @@ function buildWebhookTrigger<TProps extends PropsSchema, TItem>(
     ...def,
     async enable(input: EnableInput): Promise<WebhookRegistration | undefined> {
       if (!def.onEnable) return undefined;
-      const props = parseProps(def.props, input.props);
-      const http = input.http ?? new HttpClient();
-      const registration = await def.onEnable({
-        auth: scopeHandle(scope, input.auth),
-        props,
-        http,
-        store: input.store,
-        webhookUrl: input.webhookUrl,
-        secret: input.secret,
+      return scrubbed(input.auth, async () => {
+        const props = parseProps(def.props, input.props);
+        const http = input.http ?? new HttpClient();
+        const auth = scopeHandle(scope, input.auth);
+        const registration = await def.onEnable?.({
+          auth,
+          props,
+          http,
+          store: input.store,
+          webhookUrl: input.webhookUrl,
+          secret: input.secret,
+        });
+        return registration ?? undefined;
       });
-      return registration ?? undefined;
     },
     async disable(input: DisableInput): Promise<void> {
       if (!def.onDisable) return;
-      const props = parseProps(def.props, input.props);
-      const http = input.http ?? new HttpClient();
-      await def.onDisable({
-        auth: scopeHandle(scope, input.auth),
-        props,
-        http,
-        store: input.store,
-        webhookUrl: input.webhookUrl,
-        secret: input.secret,
-        ...(input.registration ? { registration: input.registration } : {}),
+      await scrubbed(input.auth, async () => {
+        const props = parseProps(def.props, input.props);
+        const http = input.http ?? new HttpClient();
+        const auth = scopeHandle(scope, input.auth);
+        await def.onDisable?.({
+          auth,
+          props,
+          http,
+          store: input.store,
+          webhookUrl: input.webhookUrl,
+          secret: input.secret,
+          ...(input.registration ? { registration: input.registration } : {}),
+        });
       });
     },
     handleHandshake(request: WebhookRequest): HandshakeResponse | null {
       return def.handshake ? def.handshake(request) : null;
     },
     async handleRequest(input: HandleWebhookInput): Promise<TItem[]> {
-      if (def.verify) {
-        const ok = def.verify(input.request, input.secrets ?? {});
-        if (!ok) {
+      return scrubbed(input.auth, async () => {
+        if (def.verify && !def.verify(input.request, input.secrets ?? {})) {
           throw new ActionError({
             code: 'provider_error',
             message: 'webhook signature verification failed',
@@ -282,33 +308,25 @@ function buildWebhookTrigger<TProps extends PropsSchema, TItem>(
             retryable: false,
           });
         }
-      }
-      const props = parseProps(def.props, input.props);
-      const http = input.http ?? new HttpClient();
-      const events = await def.onRequest({
-        auth: scopeHandle(scope, input.auth),
-        props,
-        http,
-        store: input.store,
-        webhookUrl: input.webhookUrl ?? '',
-        secret: input.secret ?? '',
-        request: input.request,
-      });
+        const props = parseProps(def.props, input.props);
+        const http = input.http ?? new HttpClient();
+        const auth = scopeHandle(scope, input.auth);
+        const events = await def.onRequest({
+          auth,
+          props,
+          http,
+          store: input.store,
+          webhookUrl: input.webhookUrl ?? '',
+          secret: input.secret ?? '',
+          request: input.request,
+        });
 
-      if (!def.dedupeKey) return events;
-      const seen = (await input.store.get<string[]>('seen')) ?? [];
-      const seenSet = new Set(seen);
-      const fresh: TItem[] = [];
-      const freshKeys: string[] = [];
-      for (const item of events) {
-        const key = def.dedupeKey(item);
-        if (seenSet.has(key)) continue;
-        seenSet.add(key);
-        fresh.push(item);
-        freshKeys.push(key);
-      }
-      if (freshKeys.length > 0) await input.store.set('seen', [...freshKeys, ...seen].slice(0, DEDUPE_CAP));
-      return fresh;
+        const dedupeKey = def.dedupeKey?.bind(def);
+        if (!dedupeKey) return events;
+        const { fresh, remembered } = await unseen(input.store, events, dedupeKey);
+        if (fresh.length > 0) await input.store.set('seen', remembered);
+        return fresh;
+      });
     },
     toManifest: manifest,
   };

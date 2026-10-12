@@ -3,6 +3,7 @@ import {
   failureReason,
   isRetryableStatus,
   normalizeError,
+  redactedError,
   redactSecrets,
   transportFailure,
 } from './errors';
@@ -64,6 +65,20 @@ describe('redactSecrets', () => {
 
   it('leaves clean text untouched', () => {
     expect(redactSecrets('HTTP 404: channel_not_found')).toBe('HTTP 404: channel_not_found');
+  });
+});
+
+describe('redactedError', () => {
+  it('still hands a 0.2.0 deep import a scrubbed Error copy', () => {
+    const err = new TypeError('failed for token xoxb-1-secretvalue');
+    const copy = redactedError(err);
+    expect(copy).not.toBe(err);
+    expect(copy).toBeInstanceOf(Error);
+    expect(copy).toMatchObject({ name: 'TypeError', message: 'failed for token [redacted]' });
+    expect(copy.stack).toMatch(/^TypeError: failed for token \[redacted\]\n/);
+    expect(redactedError('failed for token xoxb-1-secretvalue')).toMatchObject({
+      message: 'failed for token [redacted]',
+    });
   });
 });
 

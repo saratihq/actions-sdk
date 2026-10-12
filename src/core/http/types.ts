@@ -78,6 +78,8 @@ export interface Transport {
   /** A stable label for diagnostics ("direct", "managed-proxy"). Never secret. */
   readonly kind: string;
   send(request: NormalizedRequest): Promise<NormalizedResponse>;
+  /** Replaces each secret this transport attaches to a request with `[redacted]`; a transport that holds none may omit it. */
+  redact?(text: string): string;
 }
 
 /** The subset of the WHATWG `fetch` signature the SDK depends on; injectable so a host can supply its own. */

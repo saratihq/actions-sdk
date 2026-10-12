@@ -57,7 +57,11 @@ export const sendChannelMessage = defineAction({
   an async `options({ auth, http })` loader), `multiSelect`, `json`, `file`, `dateTime`.
 - **HTTP client** — auth injected through a pluggable transport, pagination helpers (cursor and
   `Link`-header), retry-with-backoff that honors `Retry-After` and idempotency, per-request
-  timeouts, and error normalization to a single shape `{ status, message, retryable }`.
+  timeouts, and error normalization to a single shape `{ status, message, retryable }`. Every
+  failure is scrubbed of a direct connection's credential, in the spellings
+  [the guide](https://github.com/saratihq/actions-sdk/blob/main/docs/writing-an-action.md#http-client)
+  lists, and of any secret a host transport's `redact` names. A value a `custom` scheme derives
+  from the credential (its own encoding, a signature) is not scrubbed.
 - **Auth** — an action declares an `AuthScheme` and receives an opaque `AuthHandle`. The
   credential is resolved behind the handle and is never readable by action code, so the same
   action runs with direct (bring-your-own) or managed credentials with no branching. Each scheme
@@ -68,7 +72,9 @@ export const sendChannelMessage = defineAction({
 See [`docs/writing-an-action.md`](docs/writing-an-action.md) and
 [`docs/writing-a-trigger.md`](docs/writing-a-trigger.md) for full walkthroughs. Upgrading from 0.1? Read
 [Upgrading to 0.2](https://github.com/saratihq/actions-sdk/blob/main/docs/writing-an-action.md#upgrading-to-02):
-every credentialed scheme now declares `origins`.
+every credentialed scheme now declares `origins`. Upgrading from 0.2.0? Read
+[Upgrading to 0.2.1](https://github.com/saratihq/actions-sdk/blob/main/docs/writing-an-action.md#upgrading-to-021):
+errors leaving options loaders and triggers are now scrubbed copies.
 
 ## Private addresses
 
