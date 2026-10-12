@@ -8,7 +8,7 @@ import { createAuth, createDirectAuth } from './auth-factories';
 import { ActionError } from './errors';
 import { HttpClient } from './http/client';
 import type { FetchLike, FetchLikeResponse, NormalizedResponse, Transport } from './http/types';
-import { dropdown } from './props';
+import { dropdown, resolveOptions } from './props';
 import { defineTrigger } from './trigger';
 
 const KEY = 'sk_live_1234567890abcdef';
@@ -130,6 +130,45 @@ describe.each([
     expectScrubbed(err, [pair, KEY]);
   });
 
+  it("when a Basic connection's key is its username and its password a placeholder", async () => {
+    const fetchImpl = replying(() => fakeResponse(401, `unknown api key ${KEY}`));
+    for (const password of ['', 'X']) {
+      const err = await failureOf(call(basicAuth, { type: 'basic', username: KEY, password }, fetchImpl));
+      expect((err as Error).message).toBe('HTTP 401: unknown api key [redacted]');
+      expectScrubbed(err, [KEY]);
+    }
+  });
+
+  it('a Basic username is left alone when the password is the secret', async () => {
+    const fetchImpl = replying(() => fakeResponse(401, 'no access for me@acme.test'));
+    const credential: DirectCredential = { type: 'basic', username: 'me@acme.test', password: KEY };
+    await expect(call(basicAuth, credential, fetchImpl)).rejects.toMatchObject({
+      message: 'HTTP 401: no access for me@acme.test',
+    });
+  });
+
+  it('when the provider echoes the key percent-encoded in lower case or JSON-escaped', async () => {
+    const odd = 'ab/cd+ef="gh';
+    const fetchImpl = replying(() =>
+      fakeResponse(401, 'bad key ab%2fcd%2bef%3d%22gh / ab\\/cd+ef=\\"gh / ab/cd+ef=\\"gh'),
+    );
+    const err = await failureOf(call(keyQuery, apiKey(odd), fetchImpl));
+    expect((err as Error).message).toBe('HTTP 401: bad key [redacted] / [redacted] / [redacted]');
+  });
+
+  it('a credential inside a machine field leaves the code, the name and the stack frames alone', async () => {
+    const fetchImpl = replying(() => fakeResponse(401, 'nope'));
+    const header = /^ActionError: HTTP 401: nope\n {4}at /;
+    const coded = await failureOf(call(keyHeader, apiKey('http'), fetchImpl));
+    expect(coded).toMatchObject({ name: 'ActionError', code: 'http_error', message: 'HTTP 401: nope' });
+    const credential: DirectCredential = { type: 'basic', username: 'me@acme.test', password: 'Error' };
+    const named = await failureOf(call(basicAuth, credential, fetchImpl));
+    expect(named).toMatchObject({ name: 'ActionError', code: 'http_error' });
+    expect((named as Error).stack).toMatch(header);
+    const blank = await failureOf(call(keyHeader, apiKey('    '), fetchImpl));
+    expect((blank as Error).stack).toMatch(header);
+  });
+
   it('a credential shorter than four characters leaves text that contains it untouched', async () => {
     const fetchImpl = replying(() => fakeResponse(401, 'token expired; tok is unknown'));
     await expect(call(keyHeader, apiKey('tok'), fetchImpl)).rejects.toMatchObject({
@@ -188,6 +227,19 @@ describe('an action that throws the key it was handed back never passes it on', 
         }),
     ],
     ['a thrown string', (echo: string) => `failed with ${echo}`],
+    [
+      'an ActionError whose detail keys carry it',
+      (echo: string) =>
+        new ActionError({ code: 'provider_error', message: 'bad', detail: { [echo]: 'revoked' } }),
+    ],
+    [
+      'an error whose hidden name carries it',
+      (echo: string) =>
+        Object.defineProperty(new ActionError({ code: 'provider_error', message: 'bad' }), 'name', {
+          value: `Rejected(${echo})`,
+          enumerable: false,
+        }),
+    ],
   ])('%s, from run or from an options loader', async (_kind, fail) => {
     const action = throwing(fail);
     expectScrubbed(await failureOf(action.execute({ auth: auth(), props: {}, http })), [KEY]);
@@ -216,6 +268,62 @@ describe('an action that throws the key it was handed back never passes it on', 
       detail: { reply: '[redacted]', count: 3 },
     });
     expect((err as Error).stack).toMatch(/^ActionError: rejected \[redacted\]\n\s+at /);
+  });
+
+  it('keeps a "__proto__" key as a key, not as the prototype of the copy', async () => {
+    const err = await failureOf(
+      throwing(
+        (echo) =>
+          new ActionError({
+            code: 'provider_error',
+            message: 'bad',
+            detail: JSON.parse(`{"__proto__":{"echo":"${echo}"},"y":1}`),
+          }),
+      ).execute({ auth: auth(), props: {}, http }),
+    );
+    const detail = (err as ActionError).detail as object;
+    expect(Object.getPrototypeOf(detail)).toBe(Object.prototype);
+    expect(Object.keys(detail)).toEqual(['__proto__', 'y']);
+    expect(Object.getOwnPropertyDescriptor(detail, '__proto__')?.value).toEqual({ echo: '[redacted]' });
+  });
+
+  it('drops a property it cannot read and keeps the rest of the failure', async () => {
+    const action = throwing((echo) =>
+      Object.defineProperty(new Error(`upstream failed for ${echo}`), 'body', {
+        enumerable: true,
+        get: () => {
+          throw new Error(`body unavailable for ${echo}`);
+        },
+      }),
+    );
+    for (const run of [
+      () => action.execute({ auth: auth(), props: {}, http }),
+      () => action.loadOptions('choice', { auth: auth(), http }),
+    ]) {
+      const err = await failureOf(run());
+      expect(err).toMatchObject({ message: 'upstream failed for [redacted]' });
+      expectScrubbed(err, [KEY]);
+      expect(seen(err)).not.toContain('body');
+    }
+  });
+
+  it('withholds a failure it cannot read at all rather than passing it on', async () => {
+    const action = throwing((echo) =>
+      Object.defineProperty(new Error('unread'), 'message', {
+        get: () => {
+          throw new Error(`no message for ${echo}`);
+        },
+      }),
+    );
+    for (const run of [
+      () => action.execute({ auth: auth(), props: {}, http }),
+      () => action.loadOptions('choice', { auth: auth(), http }),
+    ]) {
+      const err = await failureOf(run());
+      expect(err).toBeInstanceOf(ActionError);
+      expect(err).toMatchObject({ code: 'unknown', retryable: false, message: '[redacted]' });
+      expectScrubbed(err, [KEY]);
+    }
   });
 
   it('an error that names itself as its cause still comes back', async () => {
@@ -288,6 +396,29 @@ describe('a trigger that throws the key it was handed back never passes it on', 
   ])('%s', async (_step, run) => {
     expectScrubbed(await failureOf(run()), [KEY]);
   });
+
+  it('a dropdown the host loads through resolveOptions', async () => {
+    const choosy = defineTrigger({
+      type: 'demo.choosy',
+      name: 'Choosy',
+      description: 'Listens for one choice.',
+      auth: keyHeader,
+      props: {
+        choice: dropdown({
+          label: 'Choice',
+          required: false,
+          options: async ({ auth: handle, http: client }) => {
+            throw new Error(`bad list ${await echoed(client, handle)}`);
+          },
+        }),
+      },
+      strategy: 'webhook',
+      onRequest: () => [],
+    });
+    const err = await failureOf(resolveOptions(choosy.props.choice, { auth: auth(), http }));
+    expect(err).toMatchObject({ message: 'bad list [redacted]' });
+    expectScrubbed(err, [KEY]);
+  });
 });
 
 describe('a host transport that supplies redact', () => {
@@ -310,6 +441,18 @@ describe('a host transport that supplies redact', () => {
       callAction(keyHeader).execute({ auth: createAuth(keyHeader, host), props: {}, http }),
     );
     expect(err).toMatchObject({ message: 'HTTP 401: bad proxy key [redacted]' });
+    expectScrubbed(err, [HOST_SECRET]);
+  });
+
+  it('that throws has the failure withheld, never passed on raw', async () => {
+    const host = new HostTransport({ status: 401, headers: {}, data: `bad proxy key ${HOST_SECRET}` });
+    host.redact.mockImplementation((text: string) => {
+      throw new Error(`cannot redact ${HOST_SECRET} in ${text}`);
+    });
+    const err = await failureOf(
+      callAction(keyHeader).execute({ auth: createAuth(keyHeader, host), props: {}, http }),
+    );
+    expect(err).toMatchObject({ code: 'http_error', status: 401, retryable: false, message: '[redacted]' });
     expectScrubbed(err, [HOST_SECRET]);
   });
 

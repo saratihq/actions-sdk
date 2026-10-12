@@ -67,12 +67,11 @@ export function defineAction<TProps extends PropsSchema, TOutput>(
       try {
         return await def.run({ auth, props, http });
       } catch (err) {
-        // Guarantee the boundary contract: anything `run` throws leaves as one shape.
-        const failure =
-          err instanceof ActionError
-            ? err
-            : new ActionError({ code: 'unknown', ...normalizeError(err), cause: err });
-        throw scrubError(failure, redactorOf(auth));
+        // Scrubbed before it is read, then wrapped, so anything `run` throws leaves as one shape.
+        const scrubbed = scrubError(err, redactorOf(auth));
+        throw scrubbed instanceof ActionError
+          ? scrubbed
+          : new ActionError({ code: 'unknown', ...normalizeError(scrubbed), cause: scrubbed });
       }
     },
     async loadOptions(propName, ctx): Promise<DropdownResult<unknown>> {
@@ -85,16 +84,11 @@ export function defineAction<TProps extends PropsSchema, TOutput>(
         });
       }
       const http = ctx.http ?? new HttpClient();
-      const auth = ctx.auth ? scopeHandle(scope, ctx.auth) : undefined;
-      try {
-        return await resolveOptions(schema, {
-          ...(auth ? { auth } : {}),
-          http,
-          ...(ctx.search ? { search: ctx.search } : {}),
-        });
-      } catch (err) {
-        throw scrubError(err, auth ? redactorOf(auth) : undefined);
-      }
+      return resolveOptions(schema, {
+        ...(ctx.auth ? { auth: scopeHandle(scope, ctx.auth) } : {}),
+        http,
+        ...(ctx.search ? { search: ctx.search } : {}),
+      });
     },
     toManifest(): ManifestEntry {
       return toManifestEntry({

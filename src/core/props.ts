@@ -1,5 +1,5 @@
-import type { AuthHandle } from './auth';
-import { ActionError } from './errors';
+import { type AuthHandle, redactorOf } from './auth';
+import { ActionError, scrubError } from './errors';
 import type { HttpClient } from './http/client';
 import type { JsonValue } from './http/types';
 
@@ -256,20 +256,21 @@ function invalidInput(field: string, message: string): ActionError {
   return new ActionError({ code: 'invalid_input', message, status: 0, retryable: false, detail: { field } });
 }
 
-/** Resolve a dropdown/multiSelect's options (static or live); a missing connection yields a disabled result, not an error. */
+/** Resolve a dropdown/multiSelect's options (static or live); a missing connection yields a disabled result, and a loader's failure leaves scrubbed of the connection's credential. */
 export async function resolveOptions<V>(
   propSchema: DropdownSchema<V, boolean> | MultiSelectSchema<V, boolean>,
   ctx: Partial<OptionsContext> & { http?: HttpClient },
 ): Promise<DropdownResult<V>> {
   const source = propSchema.options;
   if (Array.isArray(source)) return { options: source, disabled: false };
-  if (!ctx.auth || !ctx.http) {
+  const { auth, http } = ctx;
+  if (!auth || !http) {
     return { options: [], disabled: true, placeholder: 'Connect an account to load options' };
   }
-  const options = await source({
-    auth: ctx.auth,
-    http: ctx.http,
-    ...(ctx.search ? { search: ctx.search } : {}),
-  });
-  return { options, disabled: false };
+  try {
+    const options = await source({ auth, http, ...(ctx.search ? { search: ctx.search } : {}) });
+    return { options, disabled: false };
+  } catch (err) {
+    throw scrubError(err, redactorOf(auth));
+  }
 }

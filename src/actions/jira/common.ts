@@ -50,7 +50,7 @@ const CLOUD_EXAMPLES =
 
 function asHttps(instanceUrl: string): { url: URL | null; schemeless: boolean } {
   const trimmed = instanceUrl.trim();
-  const schemeless = !/^[a-z][a-z0-9+.-]*:\/\//i.test(trimmed);
+  const schemeless = !/^(https?:|[a-z][a-z0-9+.-]*:\/\/)/i.test(trimmed);
   const url = parsed(schemeless ? `https://${trimmed}` : trimmed);
   if (url?.protocol === 'http:') url.protocol = 'https:';
   return { url, schemeless };

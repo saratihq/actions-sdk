@@ -153,35 +153,52 @@ export class DirectTransport implements Transport {
 
 const MIN_SECRET_LENGTH = 4;
 
+function isSecret(value: unknown): value is string {
+  return typeof value === 'string' && value.length >= MIN_SECRET_LENGTH && /\S/.test(value);
+}
+
 function credentialSecrets(credential: DirectCredential): string[] {
   switch (credential.type) {
     case 'bearer':
       return [credential.token];
     case 'apiKey':
       return [credential.value];
-    case 'basic':
-      return [
-        credential.password,
-        Buffer.from(`${credential.username}:${credential.password}`).toString('base64'),
-      ];
+    case 'basic': {
+      const { username, password } = credential;
+      const pair = Buffer.from(`${username}:${password}`).toString('base64');
+      // A blank or placeholder password means the key rides as the username (Stripe, Freshdesk, BambooHR).
+      return isSecret(password) ? [password, pair] : [password, username, pair];
+    }
     default:
       return [];
   }
 }
 
+const escapeRegExp = (text: string): string => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+const anyCase = (digit: string): string => (/[A-F]/.test(digit) ? `[${digit}${digit.toLowerCase()}]` : digit);
+
+// A percent-escape's hex digits match in either case.
+const anyCaseEscapes = (pattern: string): string =>
+  pattern.replace(
+    /%([0-9A-F])([0-9A-F])/g,
+    (_, high: string, low: string) => `%${anyCase(high)}${anyCase(low)}`,
+  );
+
+const literal = (text: string): [string, string] => [text, escapeRegExp(text)];
+const percentEncoded = (text: string): [string, string] => [text, anyCaseEscapes(escapeRegExp(text))];
+
+function spellings(secret: string): Array<[text: string, pattern: string]> {
+  const json = JSON.stringify(secret).slice(1, -1);
+  const encoded = [encodeURIComponent(secret), new URLSearchParams({ v: secret }).toString().slice(2)];
+  return [...[secret, json, json.replaceAll('/', '\\/')].map(literal), ...encoded.map(percentEncoded)];
+}
+
 function appliedSecrets(credential: DirectCredential): RegExp | null {
-  const spellings = credentialSecrets(credential)
-    .filter((secret) => typeof secret === 'string' && secret.length >= MIN_SECRET_LENGTH)
-    .flatMap((secret) => [
-      secret,
-      encodeURIComponent(secret),
-      new URLSearchParams({ v: secret }).toString().slice(2),
-    ]);
-  if (spellings.length === 0) return null;
+  const patterns = new Map(credentialSecrets(credential).filter(isSecret).flatMap(spellings));
+  if (patterns.size === 0) return null;
   // Longest first, so a spelling that contains another is redacted whole.
-  const alternatives = [...new Set(spellings)]
-    .sort((a, b) => b.length - a.length)
-    .map((spelling) => spelling.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+  const alternatives = [...patterns].sort(([a], [b]) => b.length - a.length).map(([, pattern]) => pattern);
   return new RegExp(alternatives.join('|'), 'g');
 }
 

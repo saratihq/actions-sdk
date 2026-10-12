@@ -234,6 +234,10 @@ describe('instance URLs on each vendor-documented cloud domain are reached; any 
     ['acme.atlassian.net', GATEWAY, 'https://acme.atlassian.net'],
     ['acme.atlassian.net:443', GATEWAY, 'https://acme.atlassian.net'],
     ['http://acme.atlassian.net', GATEWAY, 'https://acme.atlassian.net'],
+    ['https:acme.atlassian.net', GATEWAY, 'https://acme.atlassian.net'],
+    ['https:/acme.atlassian.net', GATEWAY, 'https://acme.atlassian.net'],
+    ['HTTPS:\\\\acme.atlassian.net', GATEWAY, 'https://acme.atlassian.net'],
+    ['http:acme.atlassian.net', GATEWAY, 'https://acme.atlassian.net'],
     ['acme.atlassian-us-gov-mod.net', GOV_GATEWAY, 'https://acme.atlassian-us-gov-mod.net'],
   ] as const)(
     'jira instanceUrl %s: an API-token connection goes straight to the site; a managed one asks %s which site it is',
@@ -472,6 +476,7 @@ describe('instance URLs on each vendor-documented cloud domain are reached; any 
     ['jira.acme-corp.example', 'has no https:// and is not a Jira Cloud site address'],
     ['acme.atlassian.net:8443', 'has no https:// and is not a Jira Cloud site address'],
     ['https://jira.acme-corp.example', 'is not a Jira Cloud site —'],
+    ['https:/jira.acme-corp.example', 'is not a Jira Cloud site —'],
     ['ftp://acme.atlassian.net', 'is not a Jira Cloud site —'],
   ])('jira instanceUrl %j is refused saying what is wrong with it', async (instanceUrl, says) => {
     const { urls, fetchImpl } = recorder(() => json({}));

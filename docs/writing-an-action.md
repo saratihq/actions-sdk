@@ -96,7 +96,7 @@ it is given, so a spec that stubs the transport still fails on a URL outside the
 
 Jira's `instanceUrl` (and `actions.jira.resolveJiraBase`) is now checked before any request: it must be
 a site on `*.atlassian.net`, `*.jira.com` or `*.atlassian-us-gov-mod.net`, and that domain picks the
-gateway. A value with no scheme, or with `http://`, is read as that site's `https://` address. Left blank,
+gateway. A value with no scheme, or with `http:`, is read as that site's `https://` address. Left blank,
 it is refused on an API-token connection and, on a managed connection, resolves only when the token
 reaches exactly one site; a URL that is none of the token's sites is refused rather than replaced by
 another. Government Cloud needs `instanceUrl` set. 0.1.x fell back to the token's first site when
@@ -132,13 +132,20 @@ For multi-page reads, the `paginate` helper covers cursor-in-body and `Link`-hea
 `slack.list_channels` for a worked example. Every failure is normalized to
 `{ status, message, retryable }`, so don't build your own error shape.
 
-Whatever the client, an action or a trigger throws leaves with the connection's credential scrubbed out of
-its message, stack, `detail` and every cause, in each spelling a request carries it (as given,
-URL-encoded, and Basic's base64 `user:pass`), on top of the token-shaped patterns `redactSecrets` removes.
-A credential value shorter than four characters is left alone, so it can't eat ordinary words. What
-leaves is a scrubbed copy: an `ActionError` stays one, any other error becomes an `Error` with the same
-name, and a value that can't be scrubbed (a class instance hung on an error) is dropped. A host transport
-that attaches a secret of its own implements `Transport.redact(text)` to have it scrubbed too.
+Whatever the client, an action, a trigger or a dropdown's options loader (`resolveOptions`) throws leaves
+with the connection's credential scrubbed out of its message, name, stack, `detail` (keys and values) and
+every cause, in each spelling a request or an echo carries it (as given, URL-encoded with either case of
+hex, JSON-escaped, and Basic's base64 `user:pass`), on top of the token-shaped patterns `redactSecrets`
+removes. A Basic username counts as the credential when the password is blank or a placeholder shorter
+than four characters, the convention of APIs that take the key as the username. A credential value
+shorter than four characters, or all whitespace, is left alone, so it can't eat ordinary words, and an
+`ActionError`'s `code`, `status` and `retryable` are kept as they are. What leaves is a scrubbed copy: an
+`ActionError` stays one, any other error becomes an `Error` with the same (scrubbed) name, and a value that
+can't be scrubbed or read (a class instance hung on an error, a getter that throws) is dropped. Scrubbing
+fails closed: a failure it cannot walk at all leaves as an `ActionError` carrying only its scrubbed message
+and, if it was one, its `code`, `status` and `retryable`; text a transport's `redact` throws on becomes
+`[redacted]`. A host transport that attaches a secret of its own implements `Transport.redact(text)` to
+have it scrubbed too.
 
 ## Testing
 

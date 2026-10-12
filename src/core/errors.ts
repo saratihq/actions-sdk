@@ -230,17 +230,67 @@ export function redactSecrets(text: string): string {
   );
 }
 
-/** `text` with a transport's own `redact` applied, then {@link redactSecrets}. */
+const REDACTED = '[redacted]';
+
+/** `text` with a transport's own `redact` applied, then {@link redactSecrets}; text `redact` throws on is redacted whole. */
 export function scrubText(text: string, redact?: (text: string) => string): string {
-  return redactSecrets(redact ? redact(text) : text);
+  try {
+    return redactSecrets(redact ? redact(text) : text);
+  } catch {
+    return REDACTED;
+  }
 }
 
 /** A copy of `err` safe to log: its message, stack, detail and every cause it wraps, scrubbed by {@link scrubText}. */
 export function scrubError(err: unknown, redact?: (text: string) => string): unknown {
-  return new Scrubber((text) => scrubText(text, redact)).value(err);
+  const clean = (text: string): string => scrubText(text, redact);
+  try {
+    return new Scrubber(clean).value(err);
+  } catch {
+    return withheld(err, clean);
+  }
 }
 
-// Keeps strings (scrubbed), primitives, arrays, plain objects and errors; drops anything else, which it could not scrub.
+/** @deprecated Use {@link scrubError}; kept for 0.2.0 deep imports, it always returns an `Error`. */
+export function redactedError(err: unknown): Error {
+  const scrubbed = scrubError(err);
+  return scrubbed instanceof Error ? scrubbed : new Error(String(scrubbed));
+}
+
+// Fails closed: what the scrubber cannot walk leaves as its scrubbed message and an ActionError's machine fields.
+function withheld(err: unknown, clean: (text: string) => string): ActionError {
+  const shape =
+    err instanceof ActionError
+      ? { code: err.code, status: err.status, retryable: err.retryable }
+      : { code: 'unknown' as const, retryable: false };
+  return new ActionError({ ...shape, message: scrubbedMessage(err, clean) });
+}
+
+function scrubbedMessage(err: unknown, clean: (text: string) => string): string {
+  try {
+    return clean(String(err instanceof Error ? err.message : err));
+  } catch {
+    return REDACTED;
+  }
+}
+
+const UNREADABLE = Symbol('unreadable');
+const ERROR_FIELDS = new Set(['name', 'message', 'stack', 'cause', 'errors']);
+const ACTION_ERROR_FIELDS = new Set([...ERROR_FIELDS, 'code', 'status', 'retryable']);
+
+function read(from: object, key: string): unknown {
+  try {
+    return (from as Record<string, unknown>)[key];
+  } catch {
+    return UNREADABLE;
+  }
+}
+
+function header(name: string, message: string): string {
+  return message ? `${name}: ${message}` : name;
+}
+
+// Keeps strings (scrubbed), primitives, arrays, plain objects and errors; drops anything else, and any entry it cannot read.
 class Scrubber {
   private readonly copies = new Map<object, object>();
 
@@ -258,10 +308,19 @@ class Scrubber {
     return proto === Object.prototype || proto === null ? this.fill(value, {}) : undefined;
   }
 
-  private fill<T extends object>(from: object, into: T): T {
+  private fill<T extends object>(from: object, into: T, skip?: ReadonlySet<string>): T {
     this.copies.set(from, into);
-    for (const [key, entry] of Object.entries(from))
-      (into as Record<string, unknown>)[key] = this.value(entry);
+    for (const key of Object.keys(from)) {
+      if (skip?.has(key)) continue;
+      const entry = read(from, key);
+      if (entry === UNREADABLE) continue;
+      Object.defineProperty(into, this.clean(key), {
+        value: this.value(entry),
+        enumerable: true,
+        writable: true,
+        configurable: true,
+      });
+    }
     return into;
   }
 
@@ -270,16 +329,23 @@ class Scrubber {
       err instanceof ActionError
         ? new ActionError({ code: err.code, status: err.status, retryable: err.retryable, message: '' })
         : new Error('');
-    copy.name = err.name;
-    this.fill(err, copy);
-    copy.message = this.clean(String(err.message));
-    if (typeof err.stack === 'string') copy.stack = this.clean(err.stack);
+    this.fill(err, copy, copy instanceof ActionError ? ACTION_ERROR_FIELDS : ERROR_FIELDS);
+    const name = String(err.name);
+    const message = String(err.message);
+    if (name !== copy.name) copy.name = this.clean(name);
+    copy.message = this.clean(message);
+    if (typeof err.stack === 'string') copy.stack = this.stack(err.stack, header(name, message), copy);
     for (const key of ['cause', 'errors'] as const) {
-      if (key in err) {
-        const value = this.value((err as { cause?: unknown; errors?: unknown })[key]);
-        Object.defineProperty(copy, key, { value, writable: true, configurable: true });
-      }
+      const value = key in err ? read(err, key) : UNREADABLE;
+      if (value === UNREADABLE) continue;
+      Object.defineProperty(copy, key, { value: this.value(value), writable: true, configurable: true });
     }
     return copy;
+  }
+
+  // The header is rebuilt from the copy's name and message, so a class name kept verbatim stays intact in it.
+  private stack(stack: string, raw: string, copy: Error): string {
+    if (!stack.startsWith(raw)) return this.clean(stack);
+    return header(copy.name, copy.message) + this.clean(stack.slice(raw.length));
   }
 }
