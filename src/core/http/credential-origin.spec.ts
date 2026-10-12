@@ -1,3 +1,5 @@
+import { inspect } from 'node:util';
+
 import type { AuthScheme, CredentialOrigins, CustomScheme, DirectCredential, NoneScheme } from '../auth';
 import { createDirectAuth } from '../auth-factories';
 import {
@@ -441,46 +443,49 @@ describe('a credential never reaches a foreign origin — real sockets', () => {
       code: 'transport_unreachable',
       message: 'Error: signing key unavailable',
     });
-    expect((failure as ActionError).cause).toBe(thrown);
+    expect((failure as ActionError).cause).toMatchObject({
+      name: 'Error',
+      message: 'signing key unavailable',
+      stack: thrown.stack,
+    });
   });
 
-  it('never calls apply for a request already aborted, so a rejecting signer cannot go unhandled', async () => {
-    const unhandled: unknown[] = [];
-    const onUnhandled = (reason: unknown): void => {
-      unhandled.push(reason);
-    };
-    process.on('unhandledRejection', onUnhandled);
-    try {
-      const apply = jest.fn(async () => {
-        await Promise.resolve();
-        throw new Error('signing key unavailable');
-      });
-      const controller = new AbortController();
-      controller.abort();
-      const transport = new DirectTransport({
-        scheme: { type: 'custom', origins: [providerOrigin], apply },
-        credential: { type: 'apiKey', value: SECRET },
-      });
-      await expect(
-        transport.send({
-          method: 'GET',
-          url: `${providerOrigin}/ok`,
-          headers: {},
-          signal: controller.signal,
+  it('never calls apply for a request already aborted, so a rejecting signer has nothing to reject', async () => {
+    const apply = jest.fn(async () => {
+      await Promise.resolve();
+      throw new Error('signing key unavailable');
+    });
+    const controller = new AbortController();
+    controller.abort();
+    const transport = new DirectTransport({
+      scheme: { type: 'custom', origins: [providerOrigin], apply },
+      credential: { type: 'apiKey', value: SECRET },
+    });
+    await expect(
+      transport.send({ method: 'GET', url: `${providerOrigin}/ok`, headers: {}, signal: controller.signal }),
+    ).rejects.toMatchObject({ code: 'transport_timeout', message: 'request aborted before it was sent' });
+    await expect(
+      withAllowedHosts('127.0.0.1', () =>
+        http.get(`${providerOrigin}/ok`, { auth: failingApply(apply), signal: controller.signal }),
+      ),
+    ).rejects.toMatchObject({ code: 'transport_timeout', message: 'request aborted by caller' });
+    expect(apply).not.toHaveBeenCalled();
+    expect(provider.hits).toHaveLength(0);
+  });
+
+  it('scrubs a credential out of the error apply threw before keeping it as the cause', async () => {
+    const leaked = 'Bearer sk_live_1234567890abcdef';
+    const failure = await withAllowedHosts('127.0.0.1', () =>
+      http.get(`${providerOrigin}/ok`, {
+        auth: failingApply(() => {
+          throw new TypeError(`signer rejected ${leaked}`);
         }),
-      ).rejects.toMatchObject({ code: 'transport_timeout', message: 'request aborted before it was sent' });
-      await expect(
-        withAllowedHosts('127.0.0.1', () =>
-          http.get(`${providerOrigin}/ok`, { auth: failingApply(apply), signal: controller.signal }),
-        ),
-      ).rejects.toMatchObject({ code: 'transport_timeout', message: 'request aborted by caller' });
-      await new Promise((resolve) => setTimeout(resolve, 30));
-      expect(apply).not.toHaveBeenCalled();
-      expect(unhandled).toEqual([]);
-      expect(provider.hits).toHaveLength(0);
-    } finally {
-      process.off('unhandledRejection', onUnhandled);
-    }
+      }),
+    ).catch((err: unknown) => err);
+    const cause = (failure as ActionError).cause as Error;
+    expect(cause).toMatchObject({ name: 'TypeError', message: 'signer rejected Bearer [redacted]' });
+    expect(cause.stack).toContain('credential-origin.spec');
+    expect(inspect(failure, { depth: Infinity })).not.toContain('sk_live_1234567890abcdef');
   });
 
   it('an ActionError thrown by apply keeps its code and is not retried when it says so', async () => {

@@ -110,6 +110,11 @@ abandoned without waiting for `apply` — it is not cancelled, and a retry calls
 code isn't `transport_timeout` or `transport_interrupted`. Any other error is retried like a failure to
 connect.
 
+A call whose signal is already aborted is never sent, and a caller abort during `apply`, the retry
+backoff or a `Retry-After` wait ends it at once with `request aborted by caller`, `retryable: false`. On
+a transport that ignores the signal, a request already handed to it may still complete server-side after
+the caller is told it was aborted.
+
 ## HTTP client
 
 The injected `http` client handles the parts every integration repeats:
