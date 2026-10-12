@@ -1,5 +1,5 @@
 import { type AuthHandle, transportOf } from '../auth';
-import { ActionError, isRetryableStatus, type NormalizedFailure, redactedError } from '../errors';
+import { ActionError, isRetryableStatus, type NormalizedFailure, scrubError, scrubText } from '../errors';
 import { buildForm, type FormInput } from './form';
 import { buildMultipart, type MultipartInput } from './multipart';
 import { backoffDelay, DEFAULT_RETRY_POLICY, parseRetryAfter, type RetryPolicy, sleep } from './retry';
@@ -12,6 +12,7 @@ import {
   type QueryValue,
   type RequestBody,
   type ResponseType,
+  type Transport,
 } from './types';
 
 const DEFAULT_TIMEOUT_MS = 30_000;
@@ -86,13 +87,28 @@ export class HttpClient {
     return this.request<T>('DELETE', url, options);
   }
 
-  /** The one send path: builds the request, runs the retry loop, normalises failures. */
+  /** The one send path: builds the request, runs the retry loop, and normalises and scrubs every failure. */
   async request<T = unknown>(
     method: HttpMethod,
     url: string,
     options: RequestOptions,
   ): Promise<HttpResponse<T>> {
     const transport = transportOf(options.auth);
+    const redact = transport.redact?.bind(transport);
+    try {
+      return await this.sendWithRetry<T>(transport, method, url, options, redact);
+    } catch (err) {
+      throw scrubError(err, redact);
+    }
+  }
+
+  private async sendWithRetry<T>(
+    transport: Transport,
+    method: HttpMethod,
+    url: string,
+    options: RequestOptions,
+    redact: ((text: string) => string) | undefined,
+  ): Promise<HttpResponse<T>> {
     const headers = { ...this.defaultHeaders, ...normalizeHeaders(options.headers) };
     const bodyKinds = [options.body, options.multipart, options.form].filter((b) => b !== undefined).length;
     if (bodyKinds > 1) {
@@ -145,12 +161,12 @@ export class HttpClient {
           dispose();
           return { status: response.status, headers: response.headers, data: response.data as T };
         }
-        failure = httpFailure(response.status, response.data);
+        failure = httpFailure(response.status, response.data, redact);
         retryAfterMs = parseRetryAfter(response.headers['retry-after']);
       } catch (err) {
         // Transport-level throw (unreachable/timeout/aborted) already normalised.
         if (err instanceof ActionError) thrown = err;
-        else cause = redactedError(err);
+        else cause = err;
         failure =
           err instanceof ActionError ? err.toFailure() : { status: 0, message: String(err), retryable: true };
       } finally {
@@ -234,19 +250,23 @@ function withTimeout(
 }
 
 /** Build a NormalizedFailure from a non-2xx HTTP response, extracting a useful message. */
-function httpFailure(status: number, data: unknown): NormalizedFailure {
-  return { status, message: `HTTP ${status}${extractMessage(data)}`, retryable: isRetryableStatus(status) };
+function httpFailure(status: number, data: unknown, redact?: (text: string) => string): NormalizedFailure {
+  return {
+    status,
+    message: `HTTP ${status}${extractMessage(data, redact)}`,
+    retryable: isRetryableStatus(status),
+  };
 }
 
-/** Pull a short, non-secret message out of a provider error body when present. */
-function extractMessage(data: unknown): string {
-  if (typeof data === 'string' && data.length > 0) return `: ${data.slice(0, 200)}`;
-  if (data && typeof data === 'object') {
-    const record = data as Record<string, unknown>;
-    const candidate = record.message ?? record.error ?? record.error_description ?? record.detail;
-    if (typeof candidate === 'string' && candidate.length > 0) return `: ${candidate.slice(0, 200)}`;
-  }
-  return '';
+/** Pull a short message out of a provider error body when present, scrubbed before it is cut so no secret is cut in half. */
+function extractMessage(data: unknown, redact?: (text: string) => string): string {
+  const record = data && typeof data === 'object' ? (data as Record<string, unknown>) : {};
+  const candidate =
+    typeof data === 'string'
+      ? data
+      : (record.message ?? record.error ?? record.error_description ?? record.detail);
+  if (typeof candidate !== 'string' || candidate.length === 0) return '';
+  return `: ${scrubText(candidate, redact).slice(0, 200)}`;
 }
 
 /** Keep only a provider error code/message in `detail`; never the whole body (may hold data). */

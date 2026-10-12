@@ -34,12 +34,18 @@ export class DirectTransport implements Transport {
   private readonly credential: DirectCredential;
   private readonly fetchImpl: FetchLike;
   private readonly scope: CredentialScope | null;
+  private readonly applied: RegExp | null;
 
   constructor(options: DirectTransportOptions) {
     this.scheme = options.scheme;
     this.credential = options.credential;
     this.fetchImpl = options.fetchImpl ?? guardedFetch;
     this.scope = credentialScope(options.scheme);
+    this.applied = appliedSecrets(options.credential);
+  }
+
+  redact(text: string): string {
+    return this.applied ? text.replace(this.applied, '[redacted]') : text;
   }
 
   async send(request: NormalizedRequest): Promise<NormalizedResponse> {
@@ -143,6 +149,40 @@ export class DirectTransport implements Transport {
     }
     return prepared;
   }
+}
+
+const MIN_SECRET_LENGTH = 4;
+
+function credentialSecrets(credential: DirectCredential): string[] {
+  switch (credential.type) {
+    case 'bearer':
+      return [credential.token];
+    case 'apiKey':
+      return [credential.value];
+    case 'basic':
+      return [
+        credential.password,
+        Buffer.from(`${credential.username}:${credential.password}`).toString('base64'),
+      ];
+    default:
+      return [];
+  }
+}
+
+function appliedSecrets(credential: DirectCredential): RegExp | null {
+  const spellings = credentialSecrets(credential)
+    .filter((secret) => typeof secret === 'string' && secret.length >= MIN_SECRET_LENGTH)
+    .flatMap((secret) => [
+      secret,
+      encodeURIComponent(secret),
+      new URLSearchParams({ v: secret }).toString().slice(2),
+    ]);
+  if (spellings.length === 0) return null;
+  // Longest first, so a spelling that contains another is redacted whole.
+  const alternatives = [...new Set(spellings)]
+    .sort((a, b) => b.length - a.length)
+    .map((spelling) => spelling.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+  return new RegExp(alternatives.join('|'), 'g');
 }
 
 async function readBody<T>(url: string, read: () => Promise<T>): Promise<T> {

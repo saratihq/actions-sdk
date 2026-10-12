@@ -57,7 +57,8 @@ export const sendChannelMessage = defineAction({
   an async `options({ auth, http })` loader), `multiSelect`, `json`, `file`, `dateTime`.
 - **HTTP client** — auth injected through a pluggable transport, pagination helpers (cursor and
   `Link`-header), retry-with-backoff that honors `Retry-After` and idempotency, per-request
-  timeouts, and error normalization to a single shape `{ status, message, retryable }`.
+  timeouts, and error normalization to a single shape `{ status, message, retryable }` with the
+  connection's credential scrubbed out of every failure.
 - **Auth** — an action declares an `AuthScheme` and receives an opaque `AuthHandle`. The
   credential is resolved behind the handle and is never readable by action code, so the same
   action runs with direct (bring-your-own) or managed credentials with no branching. Each scheme

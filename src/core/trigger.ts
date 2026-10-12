@@ -1,6 +1,6 @@
-import type { AuthHandle, AuthScheme } from './auth';
+import { type AuthHandle, type AuthScheme, redactorOf } from './auth';
 import { type ManifestEntry, toManifestEntry } from './catalog';
-import { ActionError } from './errors';
+import { ActionError, scrubError } from './errors';
 import { HttpClient } from './http/client';
 import { type CredentialScope, credentialScope, scopeHandle } from './http/credential-scope';
 import type { JsonValue } from './http/types';
@@ -194,6 +194,14 @@ export function defineTrigger<TProps extends PropsSchema, TItem>(
     : buildWebhookTrigger(def, manifest, scope);
 }
 
+async function scrubbed<T>(auth: AuthHandle, work: () => T | Promise<T>): Promise<T> {
+  try {
+    return await work();
+  } catch (err) {
+    throw scrubError(err, redactorOf(auth));
+  }
+}
+
 function buildPollingTrigger<TProps extends PropsSchema, TItem>(
   def: PollingTriggerDefinition<TProps, TItem>,
   manifest: () => ManifestEntry,
@@ -205,13 +213,16 @@ function buildPollingTrigger<TProps extends PropsSchema, TItem>(
       const props = parseProps(def.props, input.props);
       const http = input.http ?? new HttpClient();
       const lastPolledAt = await input.store.get<string>('lastPolledAt');
-      const items = await def.poll({
-        auth: scopeHandle(scope, input.auth),
-        props,
-        http,
-        store: input.store,
-        ...(lastPolledAt ? { lastPolledAt } : {}),
-      });
+      const auth = scopeHandle(scope, input.auth);
+      const items = await scrubbed(auth, () =>
+        def.poll({
+          auth,
+          props,
+          http,
+          store: input.store,
+          ...(lastPolledAt ? { lastPolledAt } : {}),
+        }),
+      );
 
       const seen = (await input.store.get<string[]>('seen')) ?? [];
       const seenSet = new Set(seen);
@@ -244,29 +255,35 @@ function buildWebhookTrigger<TProps extends PropsSchema, TItem>(
       if (!def.onEnable) return undefined;
       const props = parseProps(def.props, input.props);
       const http = input.http ?? new HttpClient();
-      const registration = await def.onEnable({
-        auth: scopeHandle(scope, input.auth),
-        props,
-        http,
-        store: input.store,
-        webhookUrl: input.webhookUrl,
-        secret: input.secret,
-      });
+      const auth = scopeHandle(scope, input.auth);
+      const registration = await scrubbed(auth, () =>
+        def.onEnable?.({
+          auth,
+          props,
+          http,
+          store: input.store,
+          webhookUrl: input.webhookUrl,
+          secret: input.secret,
+        }),
+      );
       return registration ?? undefined;
     },
     async disable(input: DisableInput): Promise<void> {
       if (!def.onDisable) return;
       const props = parseProps(def.props, input.props);
       const http = input.http ?? new HttpClient();
-      await def.onDisable({
-        auth: scopeHandle(scope, input.auth),
-        props,
-        http,
-        store: input.store,
-        webhookUrl: input.webhookUrl,
-        secret: input.secret,
-        ...(input.registration ? { registration: input.registration } : {}),
-      });
+      const auth = scopeHandle(scope, input.auth);
+      await scrubbed(auth, () =>
+        def.onDisable?.({
+          auth,
+          props,
+          http,
+          store: input.store,
+          webhookUrl: input.webhookUrl,
+          secret: input.secret,
+          ...(input.registration ? { registration: input.registration } : {}),
+        }),
+      );
     },
     handleHandshake(request: WebhookRequest): HandshakeResponse | null {
       return def.handshake ? def.handshake(request) : null;
@@ -285,15 +302,18 @@ function buildWebhookTrigger<TProps extends PropsSchema, TItem>(
       }
       const props = parseProps(def.props, input.props);
       const http = input.http ?? new HttpClient();
-      const events = await def.onRequest({
-        auth: scopeHandle(scope, input.auth),
-        props,
-        http,
-        store: input.store,
-        webhookUrl: input.webhookUrl ?? '',
-        secret: input.secret ?? '',
-        request: input.request,
-      });
+      const auth = scopeHandle(scope, input.auth);
+      const events = await scrubbed(auth, () =>
+        def.onRequest({
+          auth,
+          props,
+          http,
+          store: input.store,
+          webhookUrl: input.webhookUrl ?? '',
+          secret: input.secret ?? '',
+          request: input.request,
+        }),
+      );
 
       if (!def.dedupeKey) return events;
       const seen = (await input.store.get<string[]>('seen')) ?? [];

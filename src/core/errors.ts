@@ -230,11 +230,56 @@ export function redactSecrets(text: string): string {
   );
 }
 
-/** A copy of `err` safe to log: same name and stack frames, with secrets scrubbed from its message and stack. */
-export function redactedError(err: unknown): Error {
-  if (!(err instanceof Error)) return new Error(redactSecrets(String(err)));
-  const copy = new Error(redactSecrets(err.message));
-  copy.name = err.name;
-  if (err.stack !== undefined) copy.stack = redactSecrets(err.stack);
-  return copy;
+/** `text` with a transport's own `redact` applied, then {@link redactSecrets}. */
+export function scrubText(text: string, redact?: (text: string) => string): string {
+  return redactSecrets(redact ? redact(text) : text);
+}
+
+/** A copy of `err` safe to log: its message, stack, detail and every cause it wraps, scrubbed by {@link scrubText}. */
+export function scrubError(err: unknown, redact?: (text: string) => string): unknown {
+  return new Scrubber((text) => scrubText(text, redact)).value(err);
+}
+
+// Keeps strings (scrubbed), primitives, arrays, plain objects and errors; drops anything else, which it could not scrub.
+class Scrubber {
+  private readonly copies = new Map<object, object>();
+
+  constructor(private readonly clean: (text: string) => string) {}
+
+  value(value: unknown): unknown {
+    if (typeof value === 'string') return this.clean(value);
+    if (typeof value === 'function') return undefined;
+    if (typeof value !== 'object' || value === null) return value;
+    const copied = this.copies.get(value);
+    if (copied) return copied;
+    if (value instanceof Error) return this.error(value);
+    if (Array.isArray(value)) return this.fill(value, [] as unknown[]);
+    const proto: unknown = Object.getPrototypeOf(value);
+    return proto === Object.prototype || proto === null ? this.fill(value, {}) : undefined;
+  }
+
+  private fill<T extends object>(from: object, into: T): T {
+    this.copies.set(from, into);
+    for (const [key, entry] of Object.entries(from))
+      (into as Record<string, unknown>)[key] = this.value(entry);
+    return into;
+  }
+
+  private error(err: Error): Error {
+    const copy =
+      err instanceof ActionError
+        ? new ActionError({ code: err.code, status: err.status, retryable: err.retryable, message: '' })
+        : new Error('');
+    copy.name = err.name;
+    this.fill(err, copy);
+    copy.message = this.clean(String(err.message));
+    if (typeof err.stack === 'string') copy.stack = this.clean(err.stack);
+    for (const key of ['cause', 'errors'] as const) {
+      if (key in err) {
+        const value = this.value((err as { cause?: unknown; errors?: unknown })[key]);
+        Object.defineProperty(copy, key, { value, writable: true, configurable: true });
+      }
+    }
+    return copy;
+  }
 }

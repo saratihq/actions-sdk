@@ -86,6 +86,12 @@ export function transportOf(auth: AuthHandle): Transport {
   return transport;
 }
 
+/** The `redact` of the transport `auth` rides, or `undefined` when it has none or `auth` carries no transport. */
+export function redactorOf(auth: AuthHandle): ((text: string) => string) | undefined {
+  const transport = (auth as Partial<InternalAuthHandle> | undefined)?.[TRANSPORT];
+  return transport?.redact?.bind(transport);
+}
+
 /** The non-secret label of the rail a handle rides (`direct`, or a host broker's kind), never the transport itself. */
 export function transportKind(auth: AuthHandle): string {
   return transportOf(auth).kind;

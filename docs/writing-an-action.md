@@ -95,12 +95,13 @@ fail with the new `credential_scope` error code. An action enforces its own `ori
 it is given, so a spec that stubs the transport still fails on a URL outside them.
 
 Jira's `instanceUrl` (and `actions.jira.resolveJiraBase`) is now checked before any request: it must be
-an `https` site on `*.atlassian.net`, `*.jira.com` or `*.atlassian-us-gov-mod.net`, and that domain picks
-the gateway. Left blank, it is refused on an API-token connection and, on a managed connection, resolves
-only when the token reaches exactly one site; a URL that is none of the token's sites is refused rather
-than replaced by another. Government Cloud needs `instanceUrl` set. 0.1.x fell back to the token's first
-site when `instanceUrl` matched none of its sites; 0.2 refuses. A saved value that isn't the `https://` URL
-of one of the token's sites must be corrected, or cleared when the token reaches a single site.
+a site on `*.atlassian.net`, `*.jira.com` or `*.atlassian-us-gov-mod.net`, and that domain picks the
+gateway. A value with no scheme, or with `http://`, is read as that site's `https://` address. Left blank,
+it is refused on an API-token connection and, on a managed connection, resolves only when the token
+reaches exactly one site; a URL that is none of the token's sites is refused rather than replaced by
+another. Government Cloud needs `instanceUrl` set. 0.1.x fell back to the token's first site when
+`instanceUrl` matched none of its sites; 0.2 refuses. A saved value that isn't one of the token's sites
+must be corrected, or cleared when the token reaches a single site.
 
 A `custom` scheme's `apply` may now be async: whatever it returns is awaited before anything is sent, so
 anything it awaits delays every request until it settles. On a caller abort or a timeout the request is
@@ -111,9 +112,9 @@ code isn't `transport_timeout` or `transport_interrupted`. Any other error is re
 connect.
 
 A call whose signal is already aborted is never sent, and a caller abort during `apply`, the retry
-backoff or a `Retry-After` wait ends it at once with `request aborted by caller`, `retryable: false`. On
-a transport that ignores the signal, a request already handed to it may still complete server-side after
-the caller is told it was aborted.
+backoff or a `Retry-After` wait ends it at once with `transport_timeout`, `request aborted by caller`,
+`retryable: false`. On a transport that ignores the signal, a request already handed to it may still
+complete server-side after the caller is told it was aborted.
 
 ## HTTP client
 
@@ -130,6 +131,14 @@ await http.post(url, { auth, body: { … } });
 For multi-page reads, the `paginate` helper covers cursor-in-body and `Link`-header APIs — see
 `slack.list_channels` for a worked example. Every failure is normalized to
 `{ status, message, retryable }`, so don't build your own error shape.
+
+Whatever the client, an action or a trigger throws leaves with the connection's credential scrubbed out of
+its message, stack, `detail` and every cause, in each spelling a request carries it (as given,
+URL-encoded, and Basic's base64 `user:pass`), on top of the token-shaped patterns `redactSecrets` removes.
+A credential value shorter than four characters is left alone, so it can't eat ordinary words. What
+leaves is a scrubbed copy: an `ActionError` stays one, any other error becomes an `Error` with the same
+name, and a value that can't be scrubbed (a class instance hung on an error) is dropped. A host transport
+that attaches a secret of its own implements `Transport.redact(text)` to have it scrubbed too.
 
 ## Testing
 
