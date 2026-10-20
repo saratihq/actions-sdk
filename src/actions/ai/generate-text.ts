@@ -19,7 +19,7 @@ export interface GenerateInput {
   system?: string;
   model: string;
   temperature?: number;
-  /** Always resolved (defaults to 1024). */
+  /** Always resolved (defaults to the provider's {@link ProviderConfig.defaultMaxTokens}). */
   maxTokens: number;
   /** Always resolved (defaults to false). */
   jsonOutput: boolean;
@@ -36,6 +36,8 @@ export interface ProviderConfig {
   defaultModel: string;
   /** Static model options offered by this provider. */
   models: readonly string[];
+  /** Pre-filled `Max tokens`, and the cap sent when it is unset; 1024 when omitted. */
+  defaultMaxTokens?: number;
   /** Non-secret headers this provider requires on every call (e.g. anthropic-version). */
   extraHeaders?: Record<string, string>;
   /** The POST URL — some providers (Gemini) put the model in the path. */
@@ -48,8 +50,9 @@ export interface ProviderConfig {
   extractUsage(data: unknown): unknown;
 }
 
-/** Build one provider's `<slug>.generate_text` action; props are identical across providers. */
+/** Build one provider's `<slug>.generate_text` action; every provider has the same props, only some defaults differ. */
 export function makeGenerateText(config: ProviderConfig) {
+  const defaultMaxTokens = config.defaultMaxTokens ?? 1024;
   return defineAction({
     type: `${config.slug}.generate_text`,
     name: config.name,
@@ -78,7 +81,7 @@ export function makeGenerateText(config: ProviderConfig) {
         label: 'Max tokens',
         description: 'Upper bound on tokens to generate.',
         required: false,
-        defaultValue: 1024,
+        defaultValue: defaultMaxTokens,
       }),
       jsonOutput: checkbox({
         label: 'JSON output',
@@ -93,7 +96,7 @@ export function makeGenerateText(config: ProviderConfig) {
         ...(props.system !== undefined ? { system: props.system } : {}),
         model: props.model,
         ...(props.temperature !== undefined ? { temperature: props.temperature } : {}),
-        maxTokens: props.maxTokens ?? 1024,
+        maxTokens: props.maxTokens ?? defaultMaxTokens,
         jsonOutput: props.jsonOutput ?? false,
       };
       const res = await http.post<unknown>(config.buildUrl(input), {

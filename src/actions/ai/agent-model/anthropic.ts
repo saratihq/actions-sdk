@@ -1,6 +1,6 @@
 import type { JsonValue } from '../../../core/http/types';
 import { asArray, asRecord } from '../generate-text';
-import { normalizeUsage, throwNoTurn, type ToolCallDraft, uniqueToolCalls } from './shared';
+import { boundToolChoice, normalizeUsage, throwNoTurn, type ToolCallDraft, uniqueToolCalls } from './shared';
 import type {
   AgentConversationMessage,
   AgentModelAdapter,
@@ -49,6 +49,7 @@ function anthropicMessages(messages: readonly AgentConversationMessage[]): JsonV
 }
 
 function buildBody(req: AgentModelRequest): JsonValue {
+  const toolChoice = boundToolChoice(req);
   return {
     model: req.model,
     // Required by Anthropic; agent-sized default because a truncated tool_use block corrupts the loop.
@@ -65,6 +66,7 @@ function buildBody(req: AgentModelRequest): JsonValue {
           })),
         }
       : {}),
+    ...(toolChoice ? { tool_choice: { type: toolChoice } } : {}),
     messages: anthropicMessages(req.messages),
   };
 }

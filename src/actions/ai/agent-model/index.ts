@@ -60,6 +60,7 @@ export type {
   AgentModelResult,
   AgentProvider,
   AgentToolCall,
+  AgentToolChoice,
   AgentToolSchema,
   AgentTurnReplay,
   AgentUsage,

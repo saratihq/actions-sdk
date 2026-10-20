@@ -1,12 +1,20 @@
 import type { JsonValue } from '../../../core/http/types';
 import { asArray, asRecord } from '../generate-text';
-import { answeredCalls, normalizeUsage, throwNoTurn, type ToolCallDraft, uniqueToolCalls } from './shared';
+import {
+  answeredCalls,
+  boundToolChoice,
+  normalizeUsage,
+  throwNoTurn,
+  type ToolCallDraft,
+  uniqueToolCalls,
+} from './shared';
 import type {
   AgentConversationMessage,
   AgentModelAdapter,
   AgentModelRequest,
   AgentModelResult,
   AgentToolCall,
+  AgentToolChoice,
   AgentToolSchema,
 } from './types';
 
@@ -142,7 +150,10 @@ function geminiContents(messages: readonly AgentConversationMessage[]): JsonValu
   return out;
 }
 
+const FUNCTION_CALLING_MODE: Record<AgentToolChoice, string> = { auto: 'AUTO', none: 'NONE' };
+
 function buildBody(req: AgentModelRequest): JsonValue {
+  const toolChoice = boundToolChoice(req);
   const generationConfig: Record<string, JsonValue> = {};
   if (req.temperature !== undefined) generationConfig.temperature = req.temperature;
   if (req.maxTokens !== undefined) generationConfig.maxOutputTokens = req.maxTokens;
@@ -151,6 +162,9 @@ function buildBody(req: AgentModelRequest): JsonValue {
     // Omit `tools` entirely when empty — Gemini 400s on an empty `functionDeclarations`.
     ...(req.tools.length > 0
       ? { tools: [{ functionDeclarations: req.tools.map(functionDeclaration) }] }
+      : {}),
+    ...(toolChoice
+      ? { toolConfig: { functionCallingConfig: { mode: FUNCTION_CALLING_MODE[toolChoice] } } }
       : {}),
     ...(req.system ? { systemInstruction: { parts: [{ text: req.system }] } } : {}),
     ...(Object.keys(generationConfig).length > 0 ? { generationConfig } : {}),

@@ -147,6 +147,7 @@ export {
   type AgentModelResult,
   type AgentProvider,
   type AgentToolCall,
+  type AgentToolChoice,
   type AgentToolSchema,
   type AgentTurnReplay,
   type AgentUsage,

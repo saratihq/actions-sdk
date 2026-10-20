@@ -1070,6 +1070,9 @@ const ECHO_OK: Record<Echoing, unknown> = {
   gemini: { candidates: [{ content: { parts: [{ text: 'ok' }] } }] },
   claude: { content: [{ type: 'text', text: 'ok' }] },
 };
+const CHAT_OK = { choices: [{ message: { content: 'ok' } }] };
+const okFor = (provider: AgentModelRequest['provider']): unknown =>
+  provider === 'gemini' || provider === 'claude' ? ECHO_OK[provider] : CHAT_OK;
 
 const geminiParts = (parts: Part[]) => ({ candidates: [{ content: { role: 'model', parts } }] });
 const claudeBlocks = (content: Part[]) => ({
@@ -1098,7 +1101,7 @@ const rawClaude = (response: unknown): Part[] => (response as { content: Part[] 
 const parseTurn = (provider: Echoing, response: unknown) =>
   run(response).invoke(multiTurn(provider, ECHO_MODEL[provider]));
 
-async function echoTrip(provider: Echoing, responses: unknown[]): Promise<Record<string, unknown>> {
+async function recordTurns(provider: Echoing, responses: unknown[]): Promise<AgentConversationMessage[]> {
   const messages: AgentConversationMessage[] = [{ role: 'user', content: 'Weather in Paris and Tokyo?' }];
   for (const response of responses) {
     // Round-tripped through JSON, as a durable step records the turn.
@@ -1117,8 +1120,11 @@ async function echoTrip(provider: Echoing, responses: unknown[]): Promise<Record
       })),
     );
   }
-  return sentBody(provider, ECHO_MODEL[provider], messages, ECHO_OK[provider]);
+  return messages;
 }
+
+const echoTrip = async (provider: Echoing, responses: unknown[]): Promise<Record<string, unknown>> =>
+  sentBody(provider, ECHO_MODEL[provider], await recordTurns(provider, responses), ECHO_OK[provider]);
 
 const callRef = (call: Part | undefined): Part => ({
   ...(call && 'id' in call ? { id: call.id } : {}),
@@ -1281,6 +1287,49 @@ describe('callAgentModel — claude thinking blocks go back unmodified', () => {
     ];
     expectClaudeEcho(await echoTrip('claude', steps), steps);
   });
+
+  it.each([
+    [
+      'a leading text block',
+      [{ type: 'text', text: 'Checking.' }, thinking('SIG_P', 'Paris first.'), toolUse('toolu_p', 'Paris')],
+    ],
+    ['an earlier tool_use', [toolUse('toolu_a', 'Paris'), thinking('SIG_B'), toolUse('toolu_b', 'Tokyo')]],
+  ])(
+    'a progress-update thinking block after %s still sends the turn back as returned',
+    async (_, blocks: Part[]) => {
+      const response = claudeBlocks(blocks);
+      expect((await parseTurn('claude', response)).replay).toStrictEqual({
+        provider: 'claude',
+        content: rawClaude(response),
+      });
+      expectClaudeEcho(await echoTrip('claude', [response]), [response]);
+    },
+  );
+});
+
+describe('callAgentModel — a final answer that carries reasoning state keeps it', () => {
+  const geminiFinal = geminiParts([{ text: 'Go to Paris.', thoughtSignature: 'SIG_F' }]);
+  const claudeFinal = {
+    ...claudeBlocks([thinking('SIG_F'), { type: 'text', text: 'Go to Paris.' }]),
+    stop_reason: 'end_turn',
+  };
+
+  it.each([
+    ['gemini', geminiFinal, rawGemini(geminiFinal), { role: 'model', parts: rawGemini(geminiFinal) }],
+    ['claude', claudeFinal, rawClaude(claudeFinal), { role: 'assistant', content: rawClaude(claudeFinal) }],
+  ] as const)(
+    '%s: a text-only turn records its replay and goes back as returned',
+    async (provider, response, raw, sent) => {
+      expect(await parseTurn(provider, response)).toStrictEqual({
+        text: 'Go to Paris.',
+        toolCalls: [],
+        replay: { provider, content: raw },
+      });
+      const b = await echoTrip(provider, [response]);
+      const turns = (provider === 'gemini' ? b.contents : b.messages) as unknown[];
+      expect(JSON.stringify(turns[turns.length - 1])).toBe(JSON.stringify(sent));
+    },
+  );
 });
 
 describe('callAgentModel — a reasoning-free turn parses and goes back byte-for-byte as in v0.2.2', () => {
@@ -1399,7 +1448,6 @@ describe('callAgentModel — a replay is written back only by the provider that 
     { role: 'assistant', content: '', toolCalls: calls, ...(replay ? { replay } : {}) },
     { role: 'tool', toolCallId: 'call_1', content: '15 C' },
   ];
-  const chatOk = { choices: [{ message: { content: 'ok' } }] };
 
   it.each([
     ['gemini', 'claude'],
@@ -1409,10 +1457,80 @@ describe('callAgentModel — a replay is written back only by the provider that 
     ['mistral', 'claude'],
     ['mistral', 'gemini'],
   ] as const)('%s writes a %s replay as if it were absent', async (provider, from) => {
-    const ok = provider === 'gemini' || provider === 'claude' ? ECHO_OK[provider] : chatOk;
-    const foreign = await sentBody(provider, 'model-x', buffer(replays[from]), ok);
-    expect(foreign).toStrictEqual(await sentBody(provider, 'model-x', buffer(), ok));
+    const foreign = await sentBody(provider, 'model-x', buffer(replays[from]), okFor(provider));
+    expect(foreign).toStrictEqual(await sentBody(provider, 'model-x', buffer(), okFor(provider)));
   });
+});
+
+// ─── tool choice: the max-steps close-out keeps the tools and forbids calling them ───
+
+async function requestBody(req: AgentModelRequest): Promise<Record<string, unknown>> {
+  const { invoke, transport } = run(okFor(req.provider));
+  await invoke(req);
+  return body(transport.requests[0]!);
+}
+
+describe('callAgentModel — a tool choice goes out in the shape each provider takes, only when tools are bound', () => {
+  it.each([
+    ['claude', 'none', { tool_choice: { type: 'none' } }],
+    ['claude', 'auto', { tool_choice: { type: 'auto' } }],
+    ['gemini', 'none', { toolConfig: { functionCallingConfig: { mode: 'NONE' } } }],
+    ['gemini', 'auto', { toolConfig: { functionCallingConfig: { mode: 'AUTO' } } }],
+    ['openai', 'none', { tool_choice: 'none' }],
+    ['openai', 'auto', { tool_choice: 'auto' }],
+    ['mistral', 'none', { tool_choice: 'none' }],
+    ['mistral', 'auto', { tool_choice: 'auto' }],
+  ] as const)('%s, %s: adds only %j to the body', async (provider, toolChoice, field) => {
+    const req = multiTurn(provider, 'model-x');
+    expect(await requestBody({ ...req, toolChoice })).toStrictEqual({
+      ...(await requestBody(req)),
+      ...field,
+    });
+  });
+
+  it.each(['claude', 'gemini', 'openai', 'mistral'] as const)(
+    '%s: no tools bound, so no tool choice is sent',
+    async (provider) => {
+      const req = { ...multiTurn(provider, 'model-x'), tools: [] };
+      expect(await requestBody({ ...req, toolChoice: 'none' })).toStrictEqual(await requestBody(req));
+    },
+  );
+});
+
+function withoutHistory(b: Record<string, unknown>): Record<string, unknown> {
+  const rest = { ...b };
+  delete rest.messages;
+  delete rest.contents;
+  return rest;
+}
+
+describe('callAgentModel — a max-steps close-out after a reasoning turn changes nothing the provider checks before it', () => {
+  it.each([
+    [
+      'claude',
+      claudeBlocks([thinking('SIG_ROUND0', 'Paris first.'), toolUse('toolu_p', 'Paris')]),
+      { tool_choice: { type: 'none' } },
+    ],
+    [
+      'gemini',
+      geminiParts([fnCall('Paris', 'fc_p', { thoughtSignature: 'SIG_ROUND0' })]),
+      { toolConfig: { functionCallingConfig: { mode: 'NONE' } } },
+    ],
+  ] as const)(
+    "%s: round 0's tools and system, the turn echoed as returned, and no call allowed",
+    async (provider, response, forbid) => {
+      const req = multiTurn(provider, ECHO_MODEL[provider]);
+      const roundZero = await requestBody({ ...req, messages: await recordTurns(provider, []) });
+      const closeOut = await requestBody({
+        ...req,
+        messages: await recordTurns(provider, [response]),
+        toolChoice: 'none',
+      });
+      expect(withoutHistory(closeOut)).toStrictEqual({ ...withoutHistory(roundZero), ...forbid });
+      if (provider === 'claude') expectClaudeEcho(closeOut, [response]);
+      else expectGeminiEcho(closeOut, [response]);
+    },
+  );
 });
 
 // ─── zero-tool requests (a tools-less "just reason" agent) ───

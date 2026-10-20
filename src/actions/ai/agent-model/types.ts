@@ -35,6 +35,9 @@ export interface AgentTurnReplay {
   content: JsonValue;
 }
 
+/** `auto` lets the model decide whether to call a tool; `none` forbids every call. */
+export type AgentToolChoice = 'auto' | 'none';
+
 /** One buffer message; `system` is not a buffer message — it rides the request's own `system` field. */
 export interface AgentConversationMessage {
   role: 'user' | 'assistant' | 'tool';
@@ -72,6 +75,8 @@ export interface AgentModelRequest {
   system: string;
   messages: AgentConversationMessage[];
   tools: AgentToolSchema[];
+  /** Whether the model may call `tools`; `none` keeps them in the request and forbids a call. Sent only when `tools` is non-empty. */
+  toolChoice?: AgentToolChoice;
   temperature?: number;
   /** Upper bound on generated tokens; Anthropic requires it and defaults to 4096. */
   maxTokens?: number;

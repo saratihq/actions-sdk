@@ -4,11 +4,18 @@ import type { JsonValue } from '../../../core/http/types';
 import { liveDescribe } from '../../../testing/live';
 import { asRecord } from '../generate-text';
 import { agentModelAdapters, agentModelAuth } from './index';
-import type { AgentConversationMessage, AgentModelRequest, AgentModelResult, AgentToolSchema } from './types';
+import type {
+  AgentConversationMessage,
+  AgentModelRequest,
+  AgentModelResult,
+  AgentToolSchema,
+  AgentTurnReplay,
+} from './types';
 
 // LIVE behind ORCHESTR_LIVE=1; each provider self-skips unless GEMINI_API_KEY / ANTHROPIC_API_KEY is set.
 
 type Echoing = 'gemini' | 'claude';
+type Expectation = (status: number) => void;
 
 interface Patch {
   headers?: Record<string, string>;
@@ -27,7 +34,8 @@ interface Suite {
   model: string;
   key: string | undefined;
   patch: Patch;
-  expectWithout: (status: number) => void;
+  withoutReasoning: Expectation;
+  asV022: Expectation;
 }
 
 const CALL_TIMEOUT = 120_000;
@@ -43,19 +51,16 @@ const PROMPT =
   'I am choosing between Paris and Tokyo for an outdoor lunch today. Call get_weather once for each city, ' +
   'then weigh the two forecasts and recommend one.';
 
-const NONE_CHOICE: Record<Echoing, Patch> = {
-  gemini: { body: { toolConfig: { functionCallingConfig: { mode: 'NONE' } } } },
-  claude: { body: { tool_choice: { type: 'none' } } },
-};
-
 // Opts an older account into the preserved-thinking prefix check that accounts created from 2026-08-31 get by default.
 const PREFIX_CHECK: Patch = {
   headers: { 'anthropic-beta': 'thinking-binding-controls-2026-08-01' },
   body: { thinking: { type: 'adaptive', block_binding: { prefix_mismatch_behavior: 'error' } } },
 };
 
-const rejected = (status: number): void => expect(status).toBe(400);
-const recorded = (status: number): void => expect(status).toBeGreaterThan(0);
+const REASONING_BLOCKS = new Set(['thinking', 'redacted_thinking']);
+
+const rejected: Expectation = (status) => expect(status).toBe(400);
+const recorded: Expectation = (status) => expect(status).toBeGreaterThan(0);
 
 function errorType(data: unknown): string {
   const error = asRecord(asRecord(data)?.error);
@@ -66,19 +71,31 @@ function errorType(data: unknown): string {
 const report = (label: string, outcome: Outcome): void =>
   console.log(`live: ${label} → ${outcome.status} ${outcome.type}`);
 
+function withoutSignature(part: Record<string, JsonValue>): Record<string, JsonValue> {
+  const rest = { ...part };
+  delete rest.thoughtSignature;
+  return rest;
+}
+
+function stripReasoning(replay: AgentTurnReplay): AgentTurnReplay {
+  const content = replay.content as Record<string, JsonValue>[];
+  return {
+    provider: replay.provider,
+    content:
+      replay.provider === 'gemini'
+        ? content.map(withoutSignature)
+        : content.filter((block) => typeof block.type !== 'string' || !REASONING_BLOCKS.has(block.type)),
+  };
+}
+
 function answered(
   messages: AgentConversationMessage[],
   turn: AgentModelResult,
-  withReplay: boolean,
+  replay: AgentTurnReplay | undefined,
 ): AgentConversationMessage[] {
   return [
     ...messages,
-    {
-      role: 'assistant',
-      content: turn.text ?? '',
-      toolCalls: turn.toolCalls,
-      ...(withReplay && turn.replay ? { replay: turn.replay } : {}),
-    },
+    { role: 'assistant', content: turn.text ?? '', toolCalls: turn.toolCalls, ...(replay ? { replay } : {}) },
     ...turn.toolCalls.map((call, index) => ({
       role: 'tool' as const,
       toolCallId: call.id,
@@ -93,28 +110,24 @@ function liveSuite(suite: Suite): void {
     const auth = createDirectAuth(agentModelAuth[suite.provider], { type: 'apiKey', value: suite.key ?? '' });
     const opening: AgentConversationMessage[] = [{ role: 'user', content: PROMPT }];
     let turn: AgentModelResult;
+    let replay: AgentTurnReplay;
 
     async function send(
       messages: AgentConversationMessage[],
-      tools: AgentToolSchema[] = [WEATHER],
-      patch: Patch = {},
+      options: Pick<AgentModelRequest, 'tools' | 'toolChoice'> = { tools: [WEATHER] },
     ): Promise<Outcome> {
       const req: AgentModelRequest = {
         provider: suite.provider,
         model: suite.model,
         system: '',
         messages,
-        tools,
+        ...options,
       };
       const adapter = agentModelAdapters[suite.provider];
       const res = await http.post<unknown>(adapter.buildUrl(req), {
         auth,
-        headers: { ...adapter.extraHeaders, ...suite.patch.headers, ...patch.headers },
-        body: {
-          ...(adapter.buildBody(req) as Record<string, JsonValue>),
-          ...suite.patch.body,
-          ...patch.body,
-        },
+        headers: { ...adapter.extraHeaders, ...suite.patch.headers },
+        body: { ...(adapter.buildBody(req) as Record<string, JsonValue>), ...suite.patch.body },
         throwOnError: false,
       });
       if (res.status !== 200) return { status: res.status, type: errorType(res.data) };
@@ -128,6 +141,7 @@ function liveSuite(suite: Suite): void {
         if (outcome.status !== 200) break;
         if (outcome.turn?.replay && outcome.turn.toolCalls.length > 0) {
           turn = outcome.turn;
+          replay = outcome.turn.replay;
           return;
         }
       }
@@ -137,7 +151,7 @@ function liveSuite(suite: Suite): void {
     it(
       'round 2, echoing the turn exactly as returned, succeeds',
       async () => {
-        const outcome = await send(answered(opening, turn, true));
+        const outcome = await send(answered(opening, turn, replay));
         report(`${suite.label} round 2, turn echoed`, outcome);
         expect(outcome.status).toBe(200);
       },
@@ -145,19 +159,29 @@ function liveSuite(suite: Suite): void {
     );
 
     it(
-      'negative control: round 2 with the turn rebuilt without its reasoning state',
+      'negative control: round 2 with the echoed turn differing only by its missing reasoning state',
       async () => {
-        const outcome = await send(answered(opening, turn, false));
-        report(`${suite.label} round 2, turn rebuilt without reasoning state`, outcome);
-        suite.expectWithout(outcome.status);
+        const outcome = await send(answered(opening, turn, stripReasoning(replay)));
+        report(`${suite.label} round 2, echoed turn without its reasoning state`, outcome);
+        suite.withoutReasoning(outcome.status);
       },
       CALL_TIMEOUT,
     );
 
     it(
-      'records the max-steps close-out the engine sends today: the echoed history with no tools',
+      'round 2 as v0.2.2 sends it: the turn rebuilt from its text and calls',
       async () => {
-        const outcome = await send(answered(opening, turn, true), []);
+        const outcome = await send(answered(opening, turn, undefined));
+        report(`${suite.label} round 2, turn rebuilt as v0.2.2 does`, outcome);
+        suite.asV022(outcome.status);
+      },
+      CALL_TIMEOUT,
+    );
+
+    it(
+      'records a close-out that drops the tools after the echoed turn',
+      async () => {
+        const outcome = await send(answered(opening, turn, replay), { tools: [] });
         report(`${suite.label} close-out, no tools`, outcome);
         recorded(outcome.status);
       },
@@ -165,11 +189,12 @@ function liveSuite(suite: Suite): void {
     );
 
     it(
-      'records a close-out that keeps the tools and forbids calling them',
+      'a close-out that keeps the tools and sets tool choice none answers without calling one',
       async () => {
-        const outcome = await send(answered(opening, turn, true), [WEATHER], NONE_CHOICE[suite.provider]);
+        const outcome = await send(answered(opening, turn, replay), { tools: [WEATHER], toolChoice: 'none' });
         report(`${suite.label} close-out, tools kept, tool choice none`, outcome);
-        recorded(outcome.status);
+        expect(outcome.status).toBe(200);
+        expect(outcome.turn?.toolCalls).toEqual([]);
       },
       CALL_TIMEOUT,
     );
@@ -186,7 +211,8 @@ liveDescribe('agent model — live: reasoning state survives the tool round', ()
       model: 'gemini-3.6-flash',
       key: geminiKey,
       patch: {},
-      expectWithout: rejected,
+      withoutReasoning: rejected,
+      asV022: rejected,
     },
     ...['claude-sonnet-5', 'claude-sonnet-5-5'].map((model) => ({
       label: `claude ${model}`,
@@ -194,7 +220,8 @@ liveDescribe('agent model — live: reasoning state survives the tool round', ()
       model,
       key: anthropicKey,
       patch: {},
-      expectWithout: recorded,
+      withoutReasoning: recorded,
+      asV022: recorded,
     })),
     {
       label: 'claude claude-sonnet-5-5, prefix check on',
@@ -202,7 +229,8 @@ liveDescribe('agent model — live: reasoning state survives the tool round', ()
       model: 'claude-sonnet-5-5',
       key: anthropicKey,
       patch: PREFIX_CHECK,
-      expectWithout: recorded,
+      withoutReasoning: recorded,
+      asV022: recorded,
     },
   ];
   suites.forEach(liveSuite);

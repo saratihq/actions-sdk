@@ -1,4 +1,5 @@
 import type { ApiKeyScheme } from '../../core/auth';
+import { ActionError } from '../../core/errors';
 import type { JsonValue } from '../../core/http/types';
 import {
   asArray,
@@ -33,6 +34,14 @@ function geminiBody(input: GenerateInput): JsonValue {
 /** Extract `candidates[0].content.parts[0].text`, or throw. */
 function extractGeminiText(data: unknown): string {
   const candidate = asArray(asRecord(data)?.candidates)?.[0];
+  if (asRecord(candidate)?.finishReason === 'MAX_TOKENS') {
+    throw new ActionError({
+      code: 'provider_error',
+      message:
+        'gemini: the response reached the Max tokens limit before it finished; thinking counts toward that limit, so raise Max tokens',
+      retryable: false,
+    });
+  }
   const firstPart = asArray(asRecord(asRecord(candidate)?.content)?.parts)?.[0];
   const text = asRecord(firstPart)?.text;
   if (typeof text !== 'string') throwNoText('gemini');
@@ -47,6 +56,8 @@ export const geminiGenerateText = makeGenerateText({
   auth: geminiAuth,
   defaultModel: 'gemini-3.6-flash',
   models: ['gemini-3.6-flash', 'gemini-3.8-flash', 'gemini-3.5-flash-lite', 'gemini-4-argon'],
+  // Each listed model's own output limit, which its thinking tokens count toward.
+  defaultMaxTokens: 65_536,
   buildUrl: (input) =>
     `https://generativelanguage.googleapis.com/v1beta/models/${input.model}:generateContent`,
   buildBody: geminiBody,

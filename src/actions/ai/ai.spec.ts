@@ -191,7 +191,7 @@ describe('gemini.generate_text', () => {
       props: {
         prompt: 'Hi',
         system: 'Be brief',
-        model: 'gemini-1.5-pro',
+        model: 'gemini-3.8-flash',
         temperature: 0.3,
         maxTokens: 128,
         jsonOutput: true,
@@ -200,14 +200,14 @@ describe('gemini.generate_text', () => {
 
     expect(out).toEqual({
       text: 'hi from gemini',
-      model: 'gemini-1.5-pro',
+      model: 'gemini-3.8-flash',
       usage: { totalTokenCount: 9 },
     });
 
     const req = transport.requests[0]!;
     expect(req.method).toBe('POST');
     expect(req.url).toBe(
-      'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro:generateContent',
+      'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent',
     );
     const body = req.body as {
       contents: Array<{ role: string; parts: Array<{ text: string }> }>;
@@ -221,7 +221,7 @@ describe('gemini.generate_text', () => {
     expect(body.generationConfig.responseMimeType).toBe('application/json');
   });
 
-  it('omits systemInstruction and responseMimeType when unset', async () => {
+  it('omits systemInstruction and responseMimeType when unset, and caps output at the model limit thinking counts toward', async () => {
     const { auth, http, transport } = fake(
       constant({
         candidates: [{ content: { parts: [{ text: 'ok' }] } }],
@@ -230,21 +230,53 @@ describe('gemini.generate_text', () => {
     await geminiGenerateText.execute({
       auth,
       http,
-      props: { prompt: 'Hi', model: 'gemini-2.0-flash' },
+      props: { prompt: 'Hi', model: geminiGenerateText.props.model.defaultValue! },
     });
-    const body = transport.requests[0]!.body as {
+    const req = transport.requests[0]!;
+    expect(req.url).toBe(
+      'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent',
+    );
+    const body = req.body as {
       systemInstruction?: unknown;
       generationConfig: { maxOutputTokens: number; responseMimeType?: string };
     };
     expect(body.systemInstruction).toBeUndefined();
     expect(body.generationConfig.responseMimeType).toBeUndefined();
-    expect(body.generationConfig.maxOutputTokens).toBe(1024);
+    expect(body.generationConfig.maxOutputTokens).toBe(65_536);
+    expect(geminiGenerateText.props.maxTokens.defaultValue).toBe(65_536);
   });
 
   it('throws provider_error when candidates are empty', async () => {
     const { auth, http } = fake(constant({ candidates: [] }));
     await expect(
-      geminiGenerateText.execute({ auth, http, props: { prompt: 'x', model: 'gemini-2.0-flash' } }),
+      geminiGenerateText.execute({ auth, http, props: { prompt: 'x', model: 'gemini-3.6-flash' } }),
     ).rejects.toMatchObject({ code: 'provider_error' });
+  });
+
+  it.each([
+    ['cut-off text', { role: 'model', parts: [{ text: 'The article argues that the central' }] }],
+    ['no text at all', { role: 'model' }],
+  ])('names the Max tokens limit when the candidate stopped there with %s', async (_, content) => {
+    const { auth, http } = fake(
+      constant({
+        candidates: [{ content, finishReason: 'MAX_TOKENS' }],
+        usageMetadata: { promptTokenCount: 2100, thoughtsTokenCount: 1000, totalTokenCount: 3124 },
+      }),
+    );
+    await expect(
+      geminiGenerateText.execute({
+        auth,
+        http,
+        props: {
+          prompt: 'Summarize this article in about 300 words.',
+          model: 'gemini-3.6-flash',
+          maxTokens: 1024,
+        },
+      }),
+    ).rejects.toMatchObject({
+      code: 'provider_error',
+      retryable: false,
+      message: expect.stringContaining('reached the Max tokens limit before it finished'),
+    });
   });
 });

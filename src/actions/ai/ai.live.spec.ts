@@ -81,6 +81,28 @@ liveDescribe('ai — live generate_text via direct transport', () => {
     30_000,
   );
 
+  (geminiKey ? it : it.skip)(
+    'gemini.generate_text finishes a ~300-word answer at the default model and Max tokens',
+    async () => {
+      const auth: AuthHandle = createDirectAuth(geminiGenerateText.auth, {
+        type: 'apiKey',
+        value: geminiKey ?? '',
+      });
+      const out = await geminiGenerateText.execute({
+        auth,
+        http,
+        props: {
+          prompt: 'In about 300 words, explain why the sky is blue and why sunsets are red.',
+          model: geminiGenerateText.props.model.defaultValue!,
+        },
+      });
+      const words = out.text.trim().split(/\s+/).length;
+      console.log(`live: gemini.generate_text, ~300 words at the defaults → ${words} words`);
+      expect(words).toBeGreaterThan(150);
+    },
+    120_000,
+  );
+
   const mistralKey = process.env.MISTRAL_API_KEY;
   (mistralKey ? it : it.skip)(
     'mistral.generate_text returns text',
