@@ -151,9 +151,9 @@ Live tests hit real APIs over the direct transport and self-skip unless opted in
 
 - `ORCHESTR_LIVE=1` — enable the live suites.
 - The GitHub suites need only `ORCHESTR_LIVE=1` (they read a public repo unauthenticated).
-- The AI `generate_text` suite additionally reads a provider key per model it exercises
-  (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, `MISTRAL_API_KEY`); each provider
-  self-skips when its key is unset.
+- The AI suites (`generate_text`, and the agent model's tool round trip) additionally read a provider
+  key per model they exercise (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`,
+  `MISTRAL_API_KEY`); each provider self-skips when its key is unset.
 
 ## Releases
 

@@ -72,7 +72,8 @@ liveDescribe('ai — live generate_text via direct transport', () => {
       const out = await geminiGenerateText.execute({
         auth,
         http,
-        props: { prompt: 'Reply with the single word: pong', model: 'gemini-1.5-flash', maxTokens: 16 },
+        // Gemini 3 counts thinking toward maxOutputTokens, so this runs at the action's default budget.
+        props: { prompt: 'Reply with the single word: pong', model: 'gemini-3.6-flash' },
       });
       nonEmpty(out.text);
       console.log(`live: gemini.generate_text → "${out.text.slice(0, 40)}"`);

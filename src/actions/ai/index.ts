@@ -29,6 +29,7 @@ export {
   type AgentProvider,
   type AgentToolCall,
   type AgentToolSchema,
+  type AgentTurnReplay,
   type AgentUsage,
   anthropicAgentAdapter,
   callAgentModel,

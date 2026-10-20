@@ -45,8 +45,8 @@ export const geminiGenerateText = makeGenerateText({
   name: 'Generate text (Google Gemini)',
   description: 'Generate text from a prompt using a Google Gemini model.',
   auth: geminiAuth,
-  defaultModel: 'gemini-2.0-flash',
-  models: ['gemini-2.0-flash', 'gemini-1.5-pro', 'gemini-1.5-flash'],
+  defaultModel: 'gemini-3.6-flash',
+  models: ['gemini-3.6-flash', 'gemini-3.8-flash', 'gemini-3.5-flash-lite', 'gemini-4-argon'],
   buildUrl: (input) =>
     `https://generativelanguage.googleapis.com/v1beta/models/${input.model}:generateContent`,
   buildBody: geminiBody,

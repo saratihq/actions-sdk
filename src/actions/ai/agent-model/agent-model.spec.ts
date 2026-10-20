@@ -1,9 +1,15 @@
 import { HttpClient } from '../../../core/http/client';
-import type { NormalizedRequest } from '../../../core/http/types';
+import type { JsonValue, NormalizedRequest } from '../../../core/http/types';
 import { FakeTransport, stubAuth } from '../../../testing/fakes';
 import { callAgentModel } from './index';
 import { uniqueToolCalls } from './shared';
-import type { AgentConversationMessage, AgentModelRequest, AgentToolCall } from './types';
+import type {
+  AgentConversationMessage,
+  AgentModelRequest,
+  AgentModelResult,
+  AgentToolCall,
+  AgentTurnReplay,
+} from './types';
 
 /** Golden offline tests for the tool-aware agent model call, replaying captured provider responses. */
 
@@ -1051,6 +1057,361 @@ describe('callAgentModel — gemini tool-call ids are unique within a turn', () 
       ['get_weather_1', undefined],
       ['get_weather_1', undefined],
     ]);
+  });
+});
+
+// ─── reasoning state: a turn that carries it goes back exactly as the provider returned it ───
+
+type Part = Record<string, unknown>;
+type Echoing = 'gemini' | 'claude';
+
+const ECHO_MODEL: Record<Echoing, string> = { gemini: 'gemini-3.6-flash', claude: 'claude-sonnet-5' };
+const ECHO_OK: Record<Echoing, unknown> = {
+  gemini: { candidates: [{ content: { parts: [{ text: 'ok' }] } }] },
+  claude: { content: [{ type: 'text', text: 'ok' }] },
+};
+
+const geminiParts = (parts: Part[]) => ({ candidates: [{ content: { role: 'model', parts } }] });
+const claudeBlocks = (content: Part[]) => ({
+  id: 'msg_01',
+  type: 'message',
+  role: 'assistant',
+  content,
+  stop_reason: 'tool_use',
+});
+const fnCall = (location: string, id?: string, extra: Part = {}): Part => ({
+  functionCall: { ...(id === undefined ? {} : { id }), name: 'get_weather', args: { location } },
+  ...extra,
+});
+const toolUse = (id: string, location: string): Part => ({
+  type: 'tool_use',
+  id,
+  name: 'get_weather',
+  input: { location },
+});
+const thinking = (signature: string, text = ''): Part => ({ type: 'thinking', thinking: text, signature });
+
+const rawGemini = (response: unknown): Part[] =>
+  (response as { candidates: { content: { parts: Part[] } }[] }).candidates[0]!.content.parts;
+const rawClaude = (response: unknown): Part[] => (response as { content: Part[] }).content;
+
+const parseTurn = (provider: Echoing, response: unknown) =>
+  run(response).invoke(multiTurn(provider, ECHO_MODEL[provider]));
+
+async function echoTrip(provider: Echoing, responses: unknown[]): Promise<Record<string, unknown>> {
+  const messages: AgentConversationMessage[] = [{ role: 'user', content: 'Weather in Paris and Tokyo?' }];
+  for (const response of responses) {
+    // Round-tripped through JSON, as a durable step records the turn.
+    const turn = JSON.parse(JSON.stringify(await parseTurn(provider, response))) as AgentModelResult;
+    messages.push(
+      {
+        role: 'assistant',
+        content: turn.text ?? '',
+        toolCalls: turn.toolCalls,
+        ...(turn.replay ? { replay: turn.replay } : {}),
+      },
+      ...turn.toolCalls.map((call) => ({
+        role: 'tool' as const,
+        toolCallId: call.id,
+        content: `result for ${call.id}`,
+      })),
+    );
+  }
+  return sentBody(provider, ECHO_MODEL[provider], messages, ECHO_OK[provider]);
+}
+
+const callRef = (call: Part | undefined): Part => ({
+  ...(call && 'id' in call ? { id: call.id } : {}),
+  name: call?.name,
+});
+
+function expectGeminiEcho(b: Record<string, unknown>, responses: unknown[]): void {
+  const contents = b.contents as { role: string; parts: Part[] }[];
+  const sent = contents.filter((content) => content.role === 'model');
+  expect(JSON.stringify(sent)).toBe(
+    JSON.stringify(responses.map((response) => ({ role: 'model', parts: rawGemini(response) }))),
+  );
+  contents.forEach((content, at) => {
+    if (content.role !== 'model') return;
+    const calls = content.parts
+      .filter((part) => part.functionCall)
+      .map((part) => callRef(part.functionCall as Part));
+    const answers = (contents[at + 1]?.parts ?? []).map((part) => callRef(part.functionResponse as Part));
+    expect(calls.length).toBeGreaterThan(0);
+    expect(answers).toStrictEqual(calls);
+  });
+}
+
+function expectClaudeEcho(b: Record<string, unknown>, responses: unknown[]): void {
+  const messages = b.messages as { role: string; content: Part[] }[];
+  const sent = messages.filter((message) => message.role === 'assistant');
+  expect(JSON.stringify(sent)).toBe(
+    JSON.stringify(responses.map((response) => ({ role: 'assistant', content: rawClaude(response) }))),
+  );
+  messages.forEach((message, at) => {
+    if (message.role !== 'assistant') return;
+    const uses = message.content.filter((block) => block.type === 'tool_use').map((block) => block.id);
+    const results = (messages[at + 1]?.content ?? []).map((block) => block.tool_use_id);
+    expect(uses.length).toBeGreaterThan(0);
+    expect(results).toStrictEqual(uses);
+  });
+}
+
+describe('callAgentModel — gemini thought signatures go back in the exact part they came in', () => {
+  it('parallel calls: the one signature on the first call goes back there, both calls answered by issued id', async () => {
+    const response = geminiParts([
+      fnCall('Paris', 'fc_p', { thoughtSignature: 'SIG_A' }),
+      fnCall('Tokyo', 'fc_t'),
+    ]);
+    expect(await parseTurn('gemini', response)).toStrictEqual({
+      toolCalls: [
+        { id: 'fc_p', name: 'get_weather', input: { location: 'Paris' } },
+        { id: 'fc_t', name: 'get_weather', input: { location: 'Tokyo' } },
+      ],
+      replay: { provider: 'gemini', content: rawGemini(response) },
+    });
+    expectGeminiEcho(await echoTrip('gemini', [response]), [response]);
+  });
+
+  it("two sequential steps: each step's signed turn goes back, each answered before the next", async () => {
+    const steps = [
+      geminiParts([fnCall('Paris', 'fc_1', { thoughtSignature: 'SIG_1' })]),
+      geminiParts([fnCall('Tokyo', 'fc_2', { thoughtSignature: 'SIG_2' })]),
+    ];
+    const b = await echoTrip('gemini', steps);
+    expect((b.contents as { role: string }[]).map((content) => content.role)).toEqual([
+      'user',
+      'model',
+      'user',
+      'model',
+      'user',
+    ]);
+    expectGeminiEcho(b, steps);
+  });
+
+  it.each([
+    ['ahead of', [{ text: 'Let me check.' }, fnCall('Paris', 'fc_p', { thoughtSignature: 'SIG_T' })]],
+    ['after', [fnCall('Paris', 'fc_p', { thoughtSignature: 'SIG_T' }), { text: 'Let me check.' }]],
+  ])('text + functionCall: the text stays its own part, %s the signed call', async (_, parts: Part[]) => {
+    const response = geminiParts(parts);
+    const turn = await parseTurn('gemini', response);
+    expect(turn.text).toBe('Let me check.');
+    expect(turn.toolCalls).toStrictEqual([{ id: 'fc_p', name: 'get_weather', input: { location: 'Paris' } }]);
+    expectGeminiEcho(await echoTrip('gemini', [response]), [response]);
+  });
+
+  it('a signed empty text part goes back, not dropped', async () => {
+    const response = geminiParts([
+      fnCall('Paris', 'fc_p', { thoughtSignature: 'SIG_A' }),
+      { text: '', thoughtSignature: 'SIG_TAIL' },
+    ]);
+    expect((await parseTurn('gemini', response)).replay).toStrictEqual({
+      provider: 'gemini',
+      content: rawGemini(response),
+    });
+    expectGeminiEcho(await echoTrip('gemini', [response]), [response]);
+  });
+
+  it('Gemini 2.5: a signature on a leading text part goes back, and an id-less call is answered by name', async () => {
+    const response = geminiParts([{ text: 'Checking Paris.', thoughtSignature: 'SIG_25' }, fnCall('Paris')]);
+    expect((await parseTurn('gemini', response)).toolCalls).toStrictEqual([
+      { id: 'get_weather_0', name: 'get_weather', input: { location: 'Paris' } },
+    ]);
+    expectGeminiEcho(await echoTrip('gemini', [response]), [response]);
+  });
+
+  it('a repeated issued id goes back as issued, on the signed call and on both results', async () => {
+    const response = geminiParts([
+      fnCall('Paris', 'fc_A', { thoughtSignature: 'SIG_A' }),
+      fnCall('Tokyo', 'fc_A'),
+    ]);
+    expect((await parseTurn('gemini', response)).toolCalls).toStrictEqual([
+      { id: 'fc_A', name: 'get_weather', input: { location: 'Paris' } },
+      { id: 'fc_A_1', name: 'get_weather', input: { location: 'Tokyo' }, providerId: 'fc_A' },
+    ]);
+    expectGeminiEcho(await echoTrip('gemini', [response]), [response]);
+  });
+});
+
+describe('callAgentModel — claude thinking blocks go back unmodified', () => {
+  it('thinking + text + tool_use: the content goes back as returned, its result answers the tool_use id', async () => {
+    const response = claudeBlocks([
+      thinking('SIG_T'),
+      { type: 'text', text: 'Let me check.' },
+      toolUse('toolu_p', 'Paris'),
+    ]);
+    expect(await parseTurn('claude', response)).toStrictEqual({
+      text: 'Let me check.',
+      toolCalls: [{ id: 'toolu_p', name: 'get_weather', input: { location: 'Paris' } }],
+      replay: { provider: 'claude', content: rawClaude(response) },
+    });
+    expectClaudeEcho(await echoTrip('claude', [response]), [response]);
+  });
+
+  it('redacted_thinking: goes back with its data, never filtered out', async () => {
+    const response = claudeBlocks([
+      { type: 'redacted_thinking', data: 'ENCRYPTED' },
+      toolUse('toolu_r', 'Paris'),
+    ]);
+    expect((await parseTurn('claude', response)).replay).toStrictEqual({
+      provider: 'claude',
+      content: rawClaude(response),
+    });
+    expectClaudeEcho(await echoTrip('claude', [response]), [response]);
+  });
+
+  it('interleaved: thinking between parallel tool_use blocks keeps its place', async () => {
+    const response = claudeBlocks([
+      thinking('SIG_1', 'Both cities, one call each.'),
+      toolUse('toolu_a', 'Paris'),
+      thinking('SIG_2'),
+      toolUse('toolu_b', 'Tokyo'),
+    ]);
+    expect((await parseTurn('claude', response)).toolCalls.map((call) => call.id)).toEqual([
+      'toolu_a',
+      'toolu_b',
+    ]);
+    expectClaudeEcho(await echoTrip('claude', [response]), [response]);
+  });
+
+  it('two sequential steps: each thinking turn goes back, each answered before the next', async () => {
+    const steps = [
+      claudeBlocks([thinking('SIG_1'), toolUse('toolu_1', 'Paris')]),
+      claudeBlocks([thinking('SIG_2'), toolUse('toolu_2', 'Tokyo')]),
+    ];
+    expectClaudeEcho(await echoTrip('claude', steps), steps);
+  });
+});
+
+describe('callAgentModel — a reasoning-free turn parses and goes back byte-for-byte as in v0.2.2', () => {
+  const weatherTool = {
+    name: 'get_weather',
+    description: 'Get the current weather for a given location.',
+  };
+  const locationSchema = {
+    type: 'object',
+    properties: { location: { type: 'string' } },
+    required: ['location'],
+  };
+  const parsed = (paris: string, tokyo: string) => ({
+    text: 'Checking both.',
+    toolCalls: [
+      { id: paris, name: 'get_weather', input: { location: 'Paris' } },
+      { id: tokyo, name: 'get_weather', input: { location: 'Tokyo' } },
+    ],
+    usage: { inputTokens: 10, outputTokens: 20, totalTokens: 30 },
+  });
+  const CLAUDE_V022 = {
+    parsed: parsed('toolu_p', 'toolu_t'),
+    body: {
+      model: 'claude-sonnet-5',
+      max_tokens: 1024,
+      system: 'You are helpful.',
+      tools: [{ ...weatherTool, input_schema: locationSchema }],
+      messages: [
+        { role: 'user', content: 'Weather in Paris and Tokyo?' },
+        {
+          role: 'assistant',
+          content: [
+            { type: 'text', text: 'Checking both.' },
+            { type: 'tool_use', id: 'toolu_p', name: 'get_weather', input: { location: 'Paris' } },
+            { type: 'tool_use', id: 'toolu_t', name: 'get_weather', input: { location: 'Tokyo' } },
+          ],
+        },
+        {
+          role: 'user',
+          content: [
+            { type: 'tool_result', tool_use_id: 'toolu_p', content: 'result for toolu_p' },
+            { type: 'tool_result', tool_use_id: 'toolu_t', content: 'result for toolu_t' },
+          ],
+        },
+      ],
+    },
+  };
+  const GEMINI_V022 = {
+    parsed: parsed('fc_p', 'get_weather_1'),
+    body: {
+      contents: [
+        { role: 'user', parts: [{ text: 'Weather in Paris and Tokyo?' }] },
+        {
+          role: 'model',
+          parts: [
+            { text: 'Checking both.' },
+            { functionCall: { name: 'get_weather', args: { location: 'Paris' }, id: 'fc_p' } },
+            { functionCall: { name: 'get_weather', args: { location: 'Tokyo' } } },
+          ],
+        },
+        {
+          role: 'user',
+          parts: [
+            {
+              functionResponse: { name: 'get_weather', response: { result: 'result for fc_p' }, id: 'fc_p' },
+            },
+            { functionResponse: { name: 'get_weather', response: { result: 'result for get_weather_1' } } },
+          ],
+        },
+      ],
+      tools: [{ functionDeclarations: [{ ...weatherTool, parameters: locationSchema }] }],
+      systemInstruction: { parts: [{ text: 'You are helpful.' }] },
+      generationConfig: { maxOutputTokens: 1024 },
+    },
+  };
+  const claudePlain = {
+    ...claudeBlocks([
+      { type: 'text', text: 'Checking both.' },
+      toolUse('toolu_p', 'Paris'),
+      toolUse('toolu_t', 'Tokyo'),
+    ]),
+    usage: { input_tokens: 10, output_tokens: 20 },
+  };
+  const geminiPlain = (signature: Part) => ({
+    ...geminiParts([{ text: 'Checking both.' }, fnCall('Paris', 'fc_p', signature), fnCall('Tokyo')]),
+    usageMetadata: { promptTokenCount: 10, candidatesTokenCount: 20, totalTokenCount: 30 },
+  });
+
+  it.each([
+    ['claude', 'text + tool_use', claudePlain, CLAUDE_V022],
+    ['gemini', 'text + functionCall', geminiPlain({}), GEMINI_V022],
+    ['gemini', 'an empty thoughtSignature', geminiPlain({ thoughtSignature: '' }), GEMINI_V022],
+  ] as const)(
+    '%s, %s: no `replay` key, the same parse and the same next body',
+    async (provider, _, response, golden) => {
+      const turn = await parseTurn(provider, response);
+      expect(turn).not.toHaveProperty('replay');
+      expect(JSON.stringify({ parsed: turn, body: await echoTrip(provider, [response]) })).toBe(
+        JSON.stringify(golden),
+      );
+    },
+  );
+});
+
+describe('callAgentModel — a replay is written back only by the provider that returned it', () => {
+  const calls: AgentToolCall[] = [{ id: 'call_1', name: 'get_weather', input: { location: 'SF' } }];
+  const replays: Record<Echoing, AgentTurnReplay> = {
+    gemini: {
+      provider: 'gemini',
+      content: [fnCall('SF', 'call_1', { thoughtSignature: 'SIG_G' })] as JsonValue,
+    },
+    claude: { provider: 'claude', content: [thinking('SIG_C'), toolUse('call_1', 'SF')] as JsonValue },
+  };
+  const buffer = (replay?: AgentTurnReplay): AgentConversationMessage[] => [
+    { role: 'user', content: 'Weather in SF?' },
+    { role: 'assistant', content: '', toolCalls: calls, ...(replay ? { replay } : {}) },
+    { role: 'tool', toolCallId: 'call_1', content: '15 C' },
+  ];
+  const chatOk = { choices: [{ message: { content: 'ok' } }] };
+
+  it.each([
+    ['gemini', 'claude'],
+    ['claude', 'gemini'],
+    ['openai', 'claude'],
+    ['openai', 'gemini'],
+    ['mistral', 'claude'],
+    ['mistral', 'gemini'],
+  ] as const)('%s writes a %s replay as if it were absent', async (provider, from) => {
+    const ok = provider === 'gemini' || provider === 'claude' ? ECHO_OK[provider] : chatOk;
+    const foreign = await sentBody(provider, 'model-x', buffer(replays[from]), ok);
+    expect(foreign).toStrictEqual(await sentBody(provider, 'model-x', buffer(), ok));
   });
 });
 

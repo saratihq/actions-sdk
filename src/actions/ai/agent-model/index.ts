@@ -61,6 +61,7 @@ export type {
   AgentProvider,
   AgentToolCall,
   AgentToolSchema,
+  AgentTurnReplay,
   AgentUsage,
   JsonSchema,
 } from './types';

@@ -93,8 +93,9 @@ function geminiIssuedId(call: AgentToolCall, index: number): string | undefined 
   return call.id === synthesizeId(call.name, index) ? undefined : call.id;
 }
 
-/** An assistant turn → a `model` content with a text part (if any) + `functionCall` parts. */
+/** An assistant turn → its parts as returned when signed, else a text part (if any) + `functionCall` parts. */
 function modelContent(message: AgentConversationMessage): JsonValue {
+  if (message.replay?.provider === 'gemini') return { role: 'model', parts: message.replay.content };
   const parts: JsonValue[] = [];
   if (message.content) parts.push({ text: message.content });
   (message.toolCalls ?? []).forEach((call, index) => {
@@ -156,6 +157,12 @@ function buildBody(req: AgentModelRequest): JsonValue {
   };
 }
 
+// Gemini 3+ rejects a step whose first functionCall part comes back without its signature, in that exact part.
+function carriesSignature(part: unknown): boolean {
+  const signature = asRecord(part)?.thoughtSignature;
+  return typeof signature === 'string' && signature.length > 0;
+}
+
 function parseResponse(data: unknown): AgentModelResult {
   const parts = asArray(asRecord(asRecord(asArray(asRecord(data)?.candidates)?.[0])?.content)?.parts);
   if (!parts) throwNoTurn('gemini');
@@ -189,7 +196,10 @@ function parseResponse(data: unknown): AgentModelResult {
     'candidatesTokenCount',
     'totalTokenCount',
   );
-  return { ...(text ? { text } : {}), toolCalls, ...(usage ? { usage } : {}) };
+  const replay = parts.some(carriesSignature)
+    ? { provider: 'gemini' as const, content: parts as JsonValue }
+    : undefined;
+  return { ...(text ? { text } : {}), toolCalls, ...(usage ? { usage } : {}), ...(replay ? { replay } : {}) };
 }
 
 /** Gemini generateContent tool-aware adapter. */
