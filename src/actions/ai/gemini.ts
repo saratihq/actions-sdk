@@ -23,13 +23,7 @@ export const geminiTimeoutMs = 1_200_000;
 
 type GeminiBody = { [key: string]: JsonValue };
 
-// gemini-4-argon takes at most 32,768 per non-streaming REST call; above that the call 400s or long-decodes.
-const MODEL_MAX_TOKENS: Readonly<Record<string, number>> = {
-  'gemini-3.6-flash': 65_536,
-  'gemini-3.8-flash': 65_536,
-  'gemini-3.5-flash-lite': 65_536,
-  'gemini-4-argon': 32_768,
-};
+// Google's long-decode guide: a non-streaming REST call above 32,768 without a continuation token is a 400.
 const REST_REQUEST_CAP = 32_768;
 
 /** The `:generateContent` request body. `systemInstruction` and JSON mode live in their own slots. */
@@ -119,8 +113,8 @@ export const geminiGenerateText = makeGenerateText({
   description: 'Generate text from a prompt using a Google Gemini model.',
   auth: geminiAuth,
   defaultModel: 'gemini-3.6-flash',
-  models: Object.keys(MODEL_MAX_TOKENS),
-  defaultMaxTokens: (model) => MODEL_MAX_TOKENS[model] ?? REST_REQUEST_CAP,
+  models: ['gemini-3.6-flash', 'gemini-3.8-flash', 'gemini-3.5-flash-lite', 'gemini-4-argon'],
+  defaultMaxTokens: () => REST_REQUEST_CAP,
   timeoutMs: geminiTimeoutMs,
   buildUrl: (input) =>
     `https://generativelanguage.googleapis.com/v1beta/models/${input.model}:generateContent`,

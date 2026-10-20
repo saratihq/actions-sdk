@@ -284,9 +284,9 @@ describe('gemini.generate_text', () => {
   });
 
   it.each([
-    ['gemini-3.6-flash', 65_536],
-    ['gemini-3.8-flash', 65_536],
-    ['gemini-3.5-flash-lite', 65_536],
+    ['gemini-3.6-flash', 32_768],
+    ['gemini-3.8-flash', 32_768],
+    ['gemini-3.5-flash-lite', 32_768],
     ['gemini-4-argon', 32_768],
     ['gemini-9-unlisted', 32_768],
   ])('sends %s a blank Max tokens as %i', async (model, maxOutputTokens) => {
@@ -303,7 +303,7 @@ describe('gemini.generate_text', () => {
     });
   });
 
-  it('offers the four models and leaves Max tokens blank, since its default depends on the model', () => {
+  it("offers the four models and leaves Max tokens blank for the model's default", () => {
     expect(geminiGenerateText.props.model.options).toEqual(
       ['gemini-3.6-flash', 'gemini-3.8-flash', 'gemini-3.5-flash-lite', 'gemini-4-argon'].map((m) => ({
         label: m,
