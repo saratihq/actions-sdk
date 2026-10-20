@@ -2,6 +2,7 @@ import type { JsonValue } from '../../../core/http/types';
 import { asArray, asRecord } from '../generate-text';
 import {
   answeredCalls,
+  boundToolChoice,
   normalizeUsage,
   parseToolArguments,
   throwNoTurn,
@@ -61,6 +62,7 @@ function assistantMessage(message: AgentConversationMessage): JsonValue {
 }
 
 function buildBody(req: AgentModelRequest): JsonValue {
+  const toolChoice = boundToolChoice(req);
   return {
     model: req.model,
     messages: chatMessages(req),
@@ -77,6 +79,7 @@ function buildBody(req: AgentModelRequest): JsonValue {
           })),
         }
       : {}),
+    ...(toolChoice ? { tool_choice: toolChoice } : {}),
     ...(req.temperature !== undefined ? { temperature: req.temperature } : {}),
     ...(req.maxTokens !== undefined ? { max_tokens: req.maxTokens } : {}),
   };

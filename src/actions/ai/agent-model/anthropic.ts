@@ -1,6 +1,6 @@
 import type { JsonValue } from '../../../core/http/types';
 import { asArray, asRecord } from '../generate-text';
-import { normalizeUsage, throwNoTurn, type ToolCallDraft, uniqueToolCalls } from './shared';
+import { boundToolChoice, normalizeUsage, throwNoTurn, type ToolCallDraft, uniqueToolCalls } from './shared';
 import type {
   AgentConversationMessage,
   AgentModelAdapter,
@@ -10,8 +10,9 @@ import type {
 
 /** Anthropic Messages API tool use: `tool_result` blocks must ride INSIDE a user turn. */
 
-/** One assistant turn → a text block (if any) followed by its `tool_use` blocks. */
+/** One assistant turn → its blocks as returned when it thought, else text (if any) + `tool_use` blocks. */
 function assistantBlocks(message: AgentConversationMessage): JsonValue {
+  if (message.replay?.provider === 'claude') return message.replay.content;
   const blocks: JsonValue[] = [];
   if (message.content) blocks.push({ type: 'text', text: message.content });
   for (const call of message.toolCalls ?? []) {
@@ -48,6 +49,7 @@ function anthropicMessages(messages: readonly AgentConversationMessage[]): JsonV
 }
 
 function buildBody(req: AgentModelRequest): JsonValue {
+  const toolChoice = boundToolChoice(req);
   return {
     model: req.model,
     // Required by Anthropic; agent-sized default because a truncated tool_use block corrupts the loop.
@@ -64,8 +66,17 @@ function buildBody(req: AgentModelRequest): JsonValue {
           })),
         }
       : {}),
+    ...(toolChoice ? { tool_choice: { type: toolChoice } } : {}),
     messages: anthropicMessages(req.messages),
   };
+}
+
+// Continuing a tool-use turn requires its thinking blocks back unmodified, in their original order.
+const REASONING_BLOCKS = new Set(['thinking', 'redacted_thinking']);
+
+function isReasoning(block: unknown): boolean {
+  const type = asRecord(block)?.type;
+  return typeof type === 'string' && REASONING_BLOCKS.has(type);
 }
 
 function parseResponse(data: unknown): AgentModelResult {
@@ -84,7 +95,10 @@ function parseResponse(data: unknown): AgentModelResult {
   const toolCalls = uniqueToolCalls(drafts);
   const text = textParts.join('');
   const usage = normalizeUsage(data, 'usage', 'input_tokens', 'output_tokens', 'total_tokens');
-  return { ...(text ? { text } : {}), toolCalls, ...(usage ? { usage } : {}) };
+  const replay = content.some(isReasoning)
+    ? { provider: 'claude' as const, content: content as JsonValue }
+    : undefined;
+  return { ...(text ? { text } : {}), toolCalls, ...(usage ? { usage } : {}), ...(replay ? { replay } : {}) };
 }
 
 /** The Anthropic tool-aware adapter. */

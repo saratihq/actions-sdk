@@ -5,7 +5,7 @@ import {
   asRecord,
   type GenerateInput,
   makeGenerateText,
-  throwNoText,
+  requireText,
   usageField,
 } from './generate-text';
 
@@ -15,6 +15,17 @@ export const claudeAuth: ApiKeyScheme = {
   origins: ['https://api.anthropic.com'],
   in: 'header',
   name: 'x-api-key',
+};
+
+/** Per-request timeout of a Claude model call: the 10 minutes Anthropic's SDKs give a non-streaming request. */
+export const claudeTimeoutMs = 600_000;
+
+// Above 21,333 Anthropic's SDKs require streaming; of these models only claude-sonnet-5 thinks by default.
+const NON_STREAMING_CAP = 21_333;
+const MODEL_MAX_TOKENS: Readonly<Record<string, number>> = {
+  'claude-opus-4-8': 1024,
+  'claude-sonnet-5': NON_STREAMING_CAP,
+  'claude-haiku-4-5-20251001': 1024,
 };
 
 /** Anthropic has no `response_format`, so JSON output is requested via the system prompt. */
@@ -37,10 +48,14 @@ function claudeBody(input: GenerateInput): JsonValue {
 
 /** Extract the first `text` block from the `content` array, or throw. */
 function extractClaudeText(data: unknown): string {
-  const block = asArray(asRecord(data)?.content)?.find((b) => asRecord(b)?.type === 'text');
+  const response = asRecord(data);
+  const block = asArray(response?.content)?.find((b) => asRecord(b)?.type === 'text');
   const text = asRecord(block)?.text;
-  if (typeof text !== 'string') throwNoText('claude');
-  return text;
+  return requireText(
+    'claude',
+    typeof text === 'string' ? text : undefined,
+    response?.stop_reason === 'max_tokens',
+  );
 }
 
 /** `claude.generate_text` — generate text with an Anthropic Claude model. */
@@ -50,8 +65,10 @@ export const claudeGenerateText = makeGenerateText({
   description: 'Generate text from a prompt using an Anthropic Claude model.',
   auth: claudeAuth,
   defaultModel: 'claude-opus-4-8',
-  models: ['claude-opus-4-8', 'claude-sonnet-5', 'claude-haiku-4-5-20251001'],
+  models: Object.keys(MODEL_MAX_TOKENS),
+  defaultMaxTokens: (model) => MODEL_MAX_TOKENS[model] ?? NON_STREAMING_CAP,
   extraHeaders: { 'anthropic-version': '2023-06-01' },
+  timeoutMs: claudeTimeoutMs,
   buildUrl: () => 'https://api.anthropic.com/v1/messages',
   buildBody: claudeBody,
   extractText: extractClaudeText,
