@@ -13,17 +13,25 @@ export function throwNoTurn(label: string): never {
   });
 }
 
-/** Per buffer message, the call a tool result answers and its index, found in the latest assistant turn. */
+/** Per buffer message, the call a tool result answers and its index: the k-th result for an id answers the latest turn's k-th call holding it. */
 export function answeredCalls(
   messages: readonly AgentConversationMessage[],
 ): ({ call: AgentToolCall; index: number } | undefined)[] {
   let turn: readonly AgentToolCall[] = [];
+  let answered = new Set<number>();
   return messages.map((message) => {
-    if (message.role === 'assistant') turn = message.toolCalls ?? [];
+    if (message.role === 'assistant') {
+      turn = message.toolCalls ?? [];
+      answered = new Set();
+    }
     if (message.role !== 'tool') return undefined;
-    const index = turn.findIndex((call) => call.id === message.toolCallId);
+    const holds = (call: AgentToolCall): boolean => call.id === message.toolCallId;
+    const open = turn.findIndex((call, at) => holds(call) && !answered.has(at));
+    const index = open === -1 ? turn.findIndex(holds) : open;
     const call = turn[index];
-    return call && { call, index };
+    if (!call) return undefined;
+    answered.add(index);
+    return { call, index };
   });
 }
 

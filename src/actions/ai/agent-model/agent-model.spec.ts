@@ -560,12 +560,34 @@ async function roundTrip(
       })),
     );
   }
+  return sentBody(provider, model, messages, ok);
+}
+
+const ids = (calls: AgentToolCall[]): string[] => calls.map((call) => call.id);
+
+// One turn as recorded before ids were unique: ids may repeat, no `providerId`, results in call order.
+function legacyTurn(calls: AgentToolCall[]): AgentConversationMessage[] {
+  return [
+    { role: 'user', content: 'Weather in SF and NYC?' },
+    { role: 'assistant', content: '', toolCalls: calls },
+    ...calls.map((call, index) => ({
+      role: 'tool' as const,
+      toolCallId: call.id,
+      content: `result ${index}`,
+    })),
+  ];
+}
+
+async function sentBody(
+  provider: AgentModelRequest['provider'],
+  model: string,
+  messages: AgentConversationMessage[],
+  ok: unknown,
+): Promise<Record<string, unknown>> {
   const { invoke, transport } = run(ok);
   await invoke({ ...multiTurn(provider, model), messages });
   return body(transport.requests[0]!);
 }
-
-const ids = (calls: AgentToolCall[]): string[] => calls.map((call) => call.id);
 
 describe('uniqueToolCalls — every response of up to four calls over ids that collide with their own suffixes', () => {
   const alphabet = ['A', 'A_1', 'A_2', 'A_1_1', 'A_1_2'];
@@ -780,22 +802,32 @@ describe.each([
     ]);
   });
 
+  const resultNames = async (messages: AgentConversationMessage[]): Promise<(string | undefined)[]> => {
+    const b = await sentBody(provider, model, messages, { choices: [{ message: { content: 'ok' } }] });
+    return (b.messages as { role: string; name?: string }[])
+      .filter((message) => message.role === 'tool')
+      .map((message) => message.name);
+  };
+
   it('names each result after the call it answers in its own turn, though ids repeat across turns', async () => {
-    const { invoke, transport } = run({ choices: [{ message: { content: 'ok' } }] });
-    await invoke({
-      ...multiTurn(provider, model),
-      messages: [
-        { role: 'user', content: 'Weather in SF, then the time there?' },
-        { role: 'assistant', content: '', toolCalls: [{ id: 'call_1', name: 'get_weather', input: {} }] },
-        { role: 'tool', toolCallId: 'call_1', content: '15 C' },
-        { role: 'assistant', content: '', toolCalls: [{ id: 'call_1', name: 'get_time', input: {} }] },
-        { role: 'tool', toolCallId: 'call_1', content: '9 AM' },
-      ],
-    });
-    const results = (body(transport.requests[0]!).messages as { role: string; name?: string }[]).filter(
-      (message) => message.role === 'tool',
+    const names = await resultNames([
+      { role: 'user', content: 'Weather in SF, then the time there?' },
+      { role: 'assistant', content: '', toolCalls: [{ id: 'call_1', name: 'get_weather', input: {} }] },
+      { role: 'tool', toolCallId: 'call_1', content: '15 C' },
+      { role: 'assistant', content: '', toolCalls: [{ id: 'call_1', name: 'get_time', input: {} }] },
+      { role: 'tool', toolCallId: 'call_1', content: '9 AM' },
+    ]);
+    expect(names).toEqual(['get_weather', 'get_time']);
+  });
+
+  it('names each result after the call at its own position when a turn recorded before unique ids repeats an id', async () => {
+    const names = await resultNames(
+      legacyTurn([
+        { id: 'call_0', name: 'get_weather', input: {} },
+        { id: 'call_0', name: 'get_time', input: {} },
+      ]),
     );
-    expect(results.map((message) => message.name)).toEqual(['get_weather', 'get_time']);
+    expect(names).toEqual(['get_weather', 'get_time']);
   });
 });
 
@@ -977,6 +1009,47 @@ describe('callAgentModel — gemini tool-call ids are unique within a turn', () 
           { functionResponse: { name: 'get_weather', response: { result: 'weather in NYC' } } },
         ],
       },
+    ]);
+  });
+
+  const geminiSent = (messages: AgentConversationMessage[]) =>
+    sentBody('gemini', 'gemini-2.0-flash', messages, ok);
+
+  it('answers each call in order, by name and by id, when a turn recorded before unique ids repeats an issued id', async () => {
+    const b = await geminiSent(
+      legacyTurn([
+        { id: 'fc_1', name: 'get_weather', input: {} },
+        { id: 'fc_1', name: 'get_time', input: {} },
+      ]),
+    );
+    expect((b.contents as unknown[]).slice(1)).toEqual([
+      {
+        role: 'model',
+        parts: [
+          { functionCall: { id: 'fc_1', name: 'get_weather', args: {} } },
+          { functionCall: { id: 'fc_1', name: 'get_time', args: {} } },
+        ],
+      },
+      {
+        role: 'user',
+        parts: [
+          { functionResponse: { id: 'fc_1', name: 'get_weather', response: { result: 'result 0' } } },
+          { functionResponse: { id: 'fc_1', name: 'get_time', response: { result: 'result 1' } } },
+        ],
+      },
+    ]);
+  });
+
+  it('pairs each functionResponse id with its functionCall when a turn recorded before unique ids gave a synthesized id an issued twin', async () => {
+    const b = await geminiSent(
+      legacyTurn([
+        { id: 'get_weather_1', name: 'get_weather', input: { location: 'SF' } },
+        { id: 'get_weather_1', name: 'get_weather', input: { location: 'NYC' } },
+      ]),
+    );
+    expect(wireIds(b)).toEqual([
+      ['get_weather_1', undefined],
+      ['get_weather_1', undefined],
     ]);
   });
 });
