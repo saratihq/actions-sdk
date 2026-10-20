@@ -1,6 +1,6 @@
 import type { JsonValue } from '../../../core/http/types';
 import { asArray, asRecord } from '../generate-text';
-import { normalizeUsage, throwNoTurn, toolNamesById } from './shared';
+import { answeredCalls, normalizeUsage, throwNoTurn, type ToolCallDraft, uniqueToolCalls } from './shared';
 import type {
   AgentConversationMessage,
   AgentModelAdapter,
@@ -87,38 +87,31 @@ function functionDeclaration(tool: AgentToolSchema): JsonValue {
   };
 }
 
-/** Ids Gemini itself issued — recovered by replaying {@link parseResponse}'s indexing; these must round-trip. */
-function geminiRealCallIds(messages: readonly AgentConversationMessage[]): Set<string> {
-  const real = new Set<string>();
-  for (const message of messages) {
-    if (message.role !== 'assistant' || !message.toolCalls) continue;
-    message.toolCalls.forEach((call, index) => {
-      if (call.id !== synthesizeId(call.name, index)) real.add(call.id);
-    });
-  }
-  return real;
+// parseResponse gives `providerId` to an issued id equal to its own slot, so only synthesized ids match here.
+function geminiIssuedId(call: AgentToolCall, index: number): string | undefined {
+  if (call.providerId !== undefined) return call.providerId ?? undefined;
+  return call.id === synthesizeId(call.name, index) ? undefined : call.id;
 }
 
 /** An assistant turn → a `model` content with a text part (if any) + `functionCall` parts. */
-function modelContent(message: AgentConversationMessage, realIds: Set<string>): JsonValue {
+function modelContent(message: AgentConversationMessage): JsonValue {
   const parts: JsonValue[] = [];
   if (message.content) parts.push({ text: message.content });
-  for (const call of message.toolCalls ?? []) {
+  (message.toolCalls ?? []).forEach((call, index) => {
     const functionCall: Record<string, JsonValue> = {
       name: call.name,
       args: (call.input ?? {}) as JsonValue,
     };
-    // Echo the real per-call id back so it pairs with the functionResponse id below.
-    if (realIds.has(call.id)) functionCall.id = call.id;
+    const issued = geminiIssuedId(call, index);
+    if (issued !== undefined) functionCall.id = issued;
     parts.push({ functionCall });
-  }
+  });
   return { role: 'model', parts: parts.length > 0 ? parts : [{ text: message.content }] };
 }
 
 /** Serialize the buffer to Gemini contents, merging runs of tool results into one user turn. */
 function geminiContents(messages: readonly AgentConversationMessage[]): JsonValue {
-  const names = toolNamesById(messages);
-  const realIds = geminiRealCallIds(messages);
+  const answered = answeredCalls(messages);
   const out: JsonValue[] = [];
   let pendingResponses: JsonValue[] = [];
   const flush = (): void => {
@@ -127,21 +120,22 @@ function geminiContents(messages: readonly AgentConversationMessage[]): JsonValu
       pendingResponses = [];
     }
   };
-  for (const message of messages) {
+  for (const [at, message] of messages.entries()) {
     if (message.role === 'tool') {
-      const id = message.toolCallId ?? '';
+      const answer = answered[at];
       const functionResponse: Record<string, JsonValue> = {
-        name: names.get(id) ?? id,
+        name: answer?.call.name ?? message.toolCallId ?? '',
         response: { result: message.content },
       };
-      // Only a real Gemini-issued id disambiguates same-name calls; a synthesized one is meaningless here.
-      if (realIds.has(id)) functionResponse.id = id;
+      // Only a Gemini-issued id disambiguates same-name calls; a synthesized or de-duplicated one is ours.
+      const issued = answer && geminiIssuedId(answer.call, answer.index);
+      if (issued !== undefined) functionResponse.id = issued;
       pendingResponses.push({ functionResponse });
       continue;
     }
     flush();
     if (message.role === 'user') out.push({ role: 'user', parts: [{ text: message.content }] });
-    else out.push(modelContent(message, realIds));
+    else out.push(modelContent(message));
   }
   flush();
   return out;
@@ -166,15 +160,16 @@ function parseResponse(data: unknown): AgentModelResult {
   const parts = asArray(asRecord(asRecord(asArray(asRecord(data)?.candidates)?.[0])?.content)?.parts);
   if (!parts) throwNoTurn('gemini');
   const textParts: string[] = [];
-  const toolCalls: AgentToolCall[] = [];
+  const drafts: ToolCallDraft[] = [];
   for (const raw of parts) {
     const part = asRecord(raw);
     const fnCall = asRecord(part?.functionCall);
     if (fnCall && typeof fnCall.name === 'string') {
       // Prefer the real id Gemini sends; synthesize only when the call carried none.
-      const realId = typeof fnCall.id === 'string' && fnCall.id.length > 0 ? fnCall.id : undefined;
-      toolCalls.push({
-        id: realId ?? synthesizeId(fnCall.name, toolCalls.length),
+      const issued = typeof fnCall.id === 'string' && fnCall.id.length > 0 ? fnCall.id : undefined;
+      drafts.push({
+        id: issued ?? synthesizeId(fnCall.name, drafts.length),
+        issued,
         name: fnCall.name,
         input: fnCall.args ?? {},
       });
@@ -182,6 +177,10 @@ function parseResponse(data: unknown): AgentModelResult {
       textParts.push(part.text);
     }
   }
+  const toolCalls = uniqueToolCalls(drafts).map((call, index) => {
+    const issued = drafts[index]?.issued;
+    return issued === synthesizeId(call.name, index) ? { ...call, providerId: issued } : call;
+  });
   const text = textParts.join('');
   const usage = normalizeUsage(
     data,

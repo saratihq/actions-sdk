@@ -1,6 +1,6 @@
 import { ActionError } from '../../../core/errors';
 import { asRecord } from '../generate-text';
-import type { AgentConversationMessage, AgentUsage } from './types';
+import type { AgentConversationMessage, AgentToolCall, AgentUsage } from './types';
 
 /** Cross-provider serialization helpers shared by the four adapters. */
 
@@ -13,14 +13,49 @@ export function throwNoTurn(label: string): never {
   });
 }
 
-/** Map prior tool-call id → tool name; Gemini threads tool results by NAME and resolves through here. */
-export function toolNamesById(messages: readonly AgentConversationMessage[]): Map<string, string> {
-  const names = new Map<string, string>();
-  for (const message of messages) {
-    if (message.role !== 'assistant' || !message.toolCalls) continue;
-    for (const call of message.toolCalls) names.set(call.id, call.name);
-  }
-  return names;
+/** Per buffer message, the call a tool result answers and its index: the k-th result for an id answers the latest turn's k-th call holding it. */
+export function answeredCalls(
+  messages: readonly AgentConversationMessage[],
+): ({ call: AgentToolCall; index: number } | undefined)[] {
+  let turn: readonly AgentToolCall[] = [];
+  let answered = new Set<number>();
+  return messages.map((message) => {
+    if (message.role === 'assistant') {
+      turn = message.toolCalls ?? [];
+      answered = new Set();
+    }
+    if (message.role !== 'tool') return undefined;
+    const holds = (call: AgentToolCall): boolean => call.id === message.toolCallId;
+    const open = turn.findIndex((call, at) => holds(call) && !answered.has(at));
+    const index = open === -1 ? turn.findIndex(holds) : open;
+    const call = turn[index];
+    if (!call) return undefined;
+    answered.add(index);
+    return { call, index };
+  });
+}
+
+/** One parsed call before de-duplication: `id` may repeat within its response; `issued` is the id the provider sent. */
+export interface ToolCallDraft {
+  id: string;
+  issued: string | undefined;
+  name: string;
+  input: unknown;
+}
+
+/** Make one response's call ids unique: the first holder keeps its id; a later one appends `_<index>` until free, noting `providerId`. */
+export function uniqueToolCalls(drafts: readonly ToolCallDraft[]): AgentToolCall[] {
+  const reserved = new Set(drafts.map((draft) => draft.id));
+  const held = new Set<string>();
+  return drafts.map(({ id, issued, name, input }, index) => {
+    if (!held.has(id)) {
+      held.add(id);
+      return { id, name, input };
+    }
+    let unique = `${id}_${index}`;
+    while (reserved.has(unique)) unique = `${unique}_${index}`;
+    return { id: unique, name, input, providerId: issued ?? null };
+  });
 }
 
 /** Parse a provider's JSON-string tool arguments to a value; fall back to the raw string. */

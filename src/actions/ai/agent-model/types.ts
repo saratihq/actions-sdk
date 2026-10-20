@@ -8,12 +8,14 @@ export type JsonSchema = Record<string, unknown>;
 
 /** A tool invocation the model requested — normalized across providers. */
 export interface AgentToolCall {
-  /** Call id threading the result back next turn; synthesized for Gemini (which matches by name). */
+  /** Call id threading the result back next turn, unique within its turn; synthesized when the provider sent none. */
   id: string;
   /** The tool name the model chose — resolved against the agent's bound tools. */
   name: string;
   /** The arguments the model produced (already JSON-parsed; never a raw string). */
   input: unknown;
+  /** The id the provider issued, present only where `id` alone does not say it; null when it issued none. */
+  providerId?: string | null;
 }
 
 /** One bound tool as the model call receives it (name + description + JSON-schema params). */

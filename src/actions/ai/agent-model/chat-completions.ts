@@ -1,22 +1,28 @@
 import type { JsonValue } from '../../../core/http/types';
 import { asArray, asRecord } from '../generate-text';
-import { normalizeUsage, parseToolArguments, throwNoTurn, toolNamesById } from './shared';
+import {
+  answeredCalls,
+  normalizeUsage,
+  parseToolArguments,
+  throwNoTurn,
+  type ToolCallDraft,
+  uniqueToolCalls,
+} from './shared';
 import type {
   AgentConversationMessage,
   AgentModelAdapter,
   AgentModelRequest,
   AgentModelResult,
-  AgentToolCall,
 } from './types';
 
 /** The OpenAI / Mistral `/chat/completions` tool-calling shape — both APIs are identical here. */
 
 /** Serialize the buffer to chat-completions messages (system prepended). */
 function chatMessages(req: AgentModelRequest): JsonValue {
-  const names = toolNamesById(req.messages);
+  const answered = answeredCalls(req.messages);
   const out: JsonValue[] = [];
   if (req.system) out.push({ role: 'system', content: req.system });
-  for (const message of req.messages) {
+  for (const [at, message] of req.messages.entries()) {
     if (message.role === 'user') {
       out.push({ role: 'user', content: message.content });
     } else if (message.role === 'tool') {
@@ -25,7 +31,7 @@ function chatMessages(req: AgentModelRequest): JsonValue {
         role: 'tool',
         tool_call_id: id,
         // Mistral requires the function name on the result; OpenAI tolerates it.
-        name: names.get(id) ?? id,
+        name: answered[at]?.call.name ?? id,
         content: message.content,
       });
     } else {
@@ -79,18 +85,16 @@ function buildBody(req: AgentModelRequest): JsonValue {
 function parseResponse(data: unknown): AgentModelResult {
   const message = asRecord(asRecord(asArray(asRecord(data)?.choices)?.[0])?.message);
   if (!message) throwNoTurn('openai-chat');
-  const toolCalls: AgentToolCall[] = [];
+  const drafts: ToolCallDraft[] = [];
   for (const raw of asArray(message.tool_calls) ?? []) {
     const call = asRecord(raw);
     const fn = asRecord(call?.function);
     if (fn && typeof fn.name === 'string') {
-      toolCalls.push({
-        id: typeof call?.id === 'string' ? call.id : fn.name,
-        name: fn.name,
-        input: parseToolArguments(fn.arguments),
-      });
+      const issued = typeof call?.id === 'string' ? call.id : undefined;
+      drafts.push({ id: issued ?? fn.name, issued, name: fn.name, input: parseToolArguments(fn.arguments) });
     }
   }
+  const toolCalls = uniqueToolCalls(drafts);
   const text = typeof message.content === 'string' ? message.content : '';
   const usage = normalizeUsage(data, 'usage', 'prompt_tokens', 'completion_tokens', 'total_tokens');
   return { ...(text ? { text } : {}), toolCalls, ...(usage ? { usage } : {}) };
