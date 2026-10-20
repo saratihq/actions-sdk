@@ -2,7 +2,8 @@ import { HttpClient } from '../../../core/http/client';
 import type { NormalizedRequest } from '../../../core/http/types';
 import { FakeTransport, stubAuth } from '../../../testing/fakes';
 import { callAgentModel } from './index';
-import type { AgentModelRequest, AgentToolCall } from './types';
+import { uniqueToolCalls } from './shared';
+import type { AgentConversationMessage, AgentModelRequest, AgentToolCall } from './types';
 
 /** Golden offline tests for the tool-aware agent model call, replaying captured provider responses. */
 
@@ -491,7 +492,6 @@ describe('callAgentModel — gemini (generateContent function calling)', () => {
 
 // ─── tool-call ids are unique within a turn (the engine keys each tool step by `<round>:tool:<id>`) ───
 
-/** One tool call as a provider might send it; `id` omitted means the provider sent none. */
 interface WireCall {
   id?: string;
   location: string;
@@ -542,31 +542,52 @@ function geminiTurn(calls: WireCall[]): unknown {
   };
 }
 
-/** Parse one provider turn, then send the engine's next-round buffer back and return the wire body. */
 async function roundTrip(
   provider: AgentModelRequest['provider'],
   model: string,
-  turn: unknown,
+  turns: unknown[],
   ok: unknown,
-): Promise<{ toolCalls: AgentToolCall[]; body: Record<string, unknown> }> {
-  const { toolCalls } = await run(turn).invoke(multiTurn(provider, model));
-  const { invoke, transport } = run(ok);
-  await invoke({
-    ...multiTurn(provider, model),
-    messages: [
-      { role: 'user', content: 'Weather in SF and NYC?' },
+): Promise<Record<string, unknown>> {
+  const messages: AgentConversationMessage[] = [{ role: 'user', content: 'Weather in SF and NYC?' }];
+  for (const turn of turns) {
+    const { toolCalls } = await run(turn).invoke(multiTurn(provider, model));
+    messages.push(
       { role: 'assistant', content: '', toolCalls },
       ...toolCalls.map((call) => ({
         role: 'tool' as const,
         toolCallId: call.id,
         content: `weather in ${(call.input as { location: string }).location}`,
       })),
-    ],
-  });
-  return { toolCalls, body: body(transport.requests[0]!) };
+    );
+  }
+  const { invoke, transport } = run(ok);
+  await invoke({ ...multiTurn(provider, model), messages });
+  return body(transport.requests[0]!);
 }
 
 const ids = (calls: AgentToolCall[]): string[] => calls.map((call) => call.id);
+
+describe('uniqueToolCalls — every response of up to four calls over ids that collide with their own suffixes', () => {
+  const alphabet = ['A', 'A_1', 'A_2', 'A_1_1', 'A_1_2'];
+  const responses = (length: number): string[][] =>
+    length === 0 ? [[]] : responses(length - 1).flatMap((head) => alphabet.map((id) => [...head, id]));
+
+  it('keeps each first holder, and moves each repeat onto an id no call in the response was issued', () => {
+    const broken = [1, 2, 3, 4].flatMap(responses).filter((issued) => {
+      const calls = uniqueToolCalls(issued.map((id) => ({ id, issued: id, name: 'n', input: {} })));
+      return (
+        new Set(ids(calls)).size !== calls.length ||
+        calls.some((call, index) => {
+          const id = issued[index] ?? '';
+          return issued.indexOf(id) === index
+            ? call.id !== id || 'providerId' in call
+            : issued.includes(call.id) || call.providerId !== id;
+        })
+      );
+    });
+    expect(broken).toEqual([]);
+  });
+});
 
 describe('callAgentModel — claude tool-call ids are unique within a turn', () => {
   const claude = (calls: WireCall[]) => run(claudeTurn(calls)).invoke(multiTurn('claude', 'claude-opus-4-8'));
@@ -598,6 +619,14 @@ describe('callAgentModel — claude tool-call ids are unique within a turn', () 
     expect(out.toolCalls[1]!.providerId).toBe('get_weather');
   });
 
+  it('suffixes the name fallback of a later call that equals an earlier real id', async () => {
+    const out = await claude([{ id: 'get_weather', location: 'SF' }, { location: 'NYC' }]);
+    expect(out.toolCalls).toStrictEqual([
+      { id: 'get_weather', name: 'get_weather', input: { location: 'SF' } },
+      { id: 'get_weather_1', name: 'get_weather', input: { location: 'NYC' }, providerId: null },
+    ]);
+  });
+
   it('leaves an already-unique response byte-for-byte unchanged', async () => {
     const out = await claude([
       { id: 'toolu_A', location: 'SF' },
@@ -610,13 +639,15 @@ describe('callAgentModel — claude tool-call ids are unique within a turn', () 
   });
 
   it('sends the de-duplicated ids back on tool_use and tool_result, each result on its own call', async () => {
-    const { body: b } = await roundTrip(
+    const b = await roundTrip(
       'claude',
       'claude-opus-4-8',
-      claudeTurn([
-        { id: 'toolu_A', location: 'SF' },
-        { id: 'toolu_A', location: 'NYC' },
-      ]),
+      [
+        claudeTurn([
+          { id: 'toolu_A', location: 'SF' },
+          { id: 'toolu_A', location: 'NYC' },
+        ]),
+      ],
       { content: [{ type: 'text', text: 'ok' }] },
     );
     expect(b.messages).toEqual([
@@ -672,6 +703,14 @@ describe.each([
     expect(out.toolCalls[1]!.providerId).toBe('get_weather');
   });
 
+  it('suffixes the name fallback of a later call that equals an earlier real id', async () => {
+    const out = await chat([{ id: 'get_weather', location: 'SF' }, { location: 'NYC' }]);
+    expect(out.toolCalls).toStrictEqual([
+      { id: 'get_weather', name: 'get_weather', input: { location: 'SF' } },
+      { id: 'get_weather_1', name: 'get_weather', input: { location: 'NYC' }, providerId: null },
+    ]);
+  });
+
   it('never suffixes onto an id a later call was issued', async () => {
     const out = await chat([
       { id: 'call_A', location: 'SF' },
@@ -680,6 +719,18 @@ describe.each([
     ]);
     expect(ids(out.toolCalls)).toEqual(['call_A', 'call_A_1_1', 'call_A_1']);
     expect(out.toolCalls[2]).not.toHaveProperty('providerId');
+  });
+
+  it('keeps extending a suffix until it is free of every issued id', async () => {
+    const out = await chat([
+      { id: 'call_A', location: 'SF' },
+      { id: 'call_A', location: 'NYC' },
+      { id: 'call_A_1', location: 'LA' },
+      { id: 'call_A_1_1', location: 'SEA' },
+    ]);
+    expect(ids(out.toolCalls)).toEqual(['call_A', 'call_A_1_1_1', 'call_A_1', 'call_A_1_1']);
+    expect(out.toolCalls[1]!.providerId).toBe('call_A');
+    expect(out.toolCalls[3]).not.toHaveProperty('providerId');
   });
 
   it('leaves an already-unique response byte-for-byte unchanged', async () => {
@@ -694,13 +745,15 @@ describe.each([
   });
 
   it('sends the de-duplicated ids back on tool_calls and tool_call_id, each result on its own call', async () => {
-    const { body: b } = await roundTrip(
+    const b = await roundTrip(
       provider,
       model,
-      chatTurn([
-        { id: 'call_A', location: 'SF' },
-        { id: 'call_A', location: 'NYC' },
-      ]),
+      [
+        chatTurn([
+          { id: 'call_A', location: 'SF' },
+          { id: 'call_A', location: 'NYC' },
+        ]),
+      ],
       { choices: [{ message: { content: 'ok' } }] },
     );
     expect(b.messages).toEqual([
@@ -726,13 +779,36 @@ describe.each([
       { role: 'tool', tool_call_id: 'call_A_1', name: 'get_weather', content: 'weather in NYC' },
     ]);
   });
+
+  it('names each result after the call it answers in its own turn, though ids repeat across turns', async () => {
+    const { invoke, transport } = run({ choices: [{ message: { content: 'ok' } }] });
+    await invoke({
+      ...multiTurn(provider, model),
+      messages: [
+        { role: 'user', content: 'Weather in SF, then the time there?' },
+        { role: 'assistant', content: '', toolCalls: [{ id: 'call_1', name: 'get_weather', input: {} }] },
+        { role: 'tool', toolCallId: 'call_1', content: '15 C' },
+        { role: 'assistant', content: '', toolCalls: [{ id: 'call_1', name: 'get_time', input: {} }] },
+        { role: 'tool', toolCallId: 'call_1', content: '9 AM' },
+      ],
+    });
+    const results = (body(transport.requests[0]!).messages as { role: string; name?: string }[]).filter(
+      (message) => message.role === 'tool',
+    );
+    expect(results.map((message) => message.name)).toEqual(['get_weather', 'get_time']);
+  });
 });
 
 describe('callAgentModel — gemini tool-call ids are unique within a turn', () => {
   const gemini = (calls: WireCall[]) =>
     run(geminiTurn(calls)).invoke(multiTurn('gemini', 'gemini-2.0-flash'));
   const ok = { candidates: [{ content: { parts: [{ text: 'ok' }] } }] };
-  const geminiTrip = (calls: WireCall[]) => roundTrip('gemini', 'gemini-2.0-flash', geminiTurn(calls), ok);
+  const geminiTrip = (...turns: WireCall[][]) =>
+    roundTrip('gemini', 'gemini-2.0-flash', turns.map(geminiTurn), ok);
+  const wireIds = (b: Record<string, unknown>): (string | undefined)[][] =>
+    (b.contents as { parts: Record<string, { id?: string }>[] }[])
+      .slice(1)
+      .map((content) => content.parts.map((part) => Object.values(part)[0]?.id));
 
   it('suffixes a repeated functionCall id by call index, deterministically', async () => {
     const turn = [
@@ -779,8 +855,54 @@ describe('callAgentModel — gemini tool-call ids are unique within a turn', () 
     ]);
   });
 
+  it('marks an issued id that equals its own synthesized slot as issued', async () => {
+    const out = await gemini([
+      { id: 'fc_A', location: 'SF' },
+      { id: 'get_weather_1', location: 'NYC' },
+    ]);
+    expect(out.toolCalls).toStrictEqual([
+      { id: 'fc_A', name: 'get_weather', input: { location: 'SF' } },
+      { id: 'get_weather_1', name: 'get_weather', input: { location: 'NYC' }, providerId: 'get_weather_1' },
+    ]);
+  });
+
+  it.each([
+    ['alone', [{ id: 'get_weather_1' }], ['fc_A', 'get_weather_1']],
+    [
+      'repeated',
+      [{ id: 'get_weather_1' }, { id: 'get_weather_1' }],
+      ['fc_A', 'get_weather_1', 'get_weather_1'],
+    ],
+    ['after a synthesized twin', [{}, { id: 'get_weather_1' }], ['fc_A', undefined, 'get_weather_1']],
+  ])(
+    'sends back exactly the ids Gemini issued when one equals its own synthesized slot (%s)',
+    async (_, rest: { id?: string }[], sent: (string | undefined)[]) => {
+      const calls = [{ id: 'fc_A' }, ...rest].map((call, index) => ({ ...call, location: `L${index}` }));
+      expect(wireIds(await geminiTrip(calls))).toEqual([sent, sent]);
+    },
+  );
+
+  it('sends back each turn its own issued ids, though a synthesized id repeats an issued one across turns', async () => {
+    const b = await geminiTrip(
+      [{ location: 'SF' }],
+      [
+        { id: 'fc_C', location: 'LA' },
+        { id: 'get_weather_0', location: 'NYC' },
+      ],
+      [{ location: 'SEA' }],
+    );
+    expect(wireIds(b)).toEqual([
+      [undefined],
+      [undefined],
+      ['fc_C', 'get_weather_0'],
+      ['fc_C', 'get_weather_0'],
+      [undefined],
+      [undefined],
+    ]);
+  });
+
   it('sends back only the ids Gemini issued: a repeated id goes back as issued, on call and result', async () => {
-    const { body: b } = await geminiTrip([
+    const b = await geminiTrip([
       { id: 'fc_A', location: 'SF' },
       { id: 'fc_A', location: 'NYC' },
     ]);
@@ -805,7 +927,7 @@ describe('callAgentModel — gemini tool-call ids are unique within a turn', () 
   });
 
   it('sends back a real id that collided with a synthesized one, and no id for the synthesized call', async () => {
-    const { body: b } = await geminiTrip([{ location: 'SF' }, { id: 'get_weather_0', location: 'NYC' }]);
+    const b = await geminiTrip([{ location: 'SF' }, { id: 'get_weather_0', location: 'NYC' }]);
     expect(b.contents).toEqual([
       { role: 'user', parts: [{ text: 'Weather in SF and NYC?' }] },
       {
@@ -832,7 +954,7 @@ describe('callAgentModel — gemini tool-call ids are unique within a turn', () 
   });
 
   it('never sends a suffixed synthesized id as if Gemini had issued it', async () => {
-    const { body: b } = await geminiTrip([{ id: 'get_weather_1', location: 'SF' }, { location: 'NYC' }]);
+    const b = await geminiTrip([{ id: 'get_weather_1', location: 'SF' }, { location: 'NYC' }]);
     expect(b.contents).toEqual([
       { role: 'user', parts: [{ text: 'Weather in SF and NYC?' }] },
       {

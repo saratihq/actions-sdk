@@ -13,14 +13,18 @@ export function throwNoTurn(label: string): never {
   });
 }
 
-/** Map prior tool-call id → tool name; Gemini threads tool results by NAME and resolves through here. */
-export function toolNamesById(messages: readonly AgentConversationMessage[]): Map<string, string> {
-  const names = new Map<string, string>();
-  for (const message of messages) {
-    if (message.role !== 'assistant' || !message.toolCalls) continue;
-    for (const call of message.toolCalls) names.set(call.id, call.name);
-  }
-  return names;
+/** Per buffer message, the call a tool result answers and its index, found in the latest assistant turn. */
+export function answeredCalls(
+  messages: readonly AgentConversationMessage[],
+): ({ call: AgentToolCall; index: number } | undefined)[] {
+  let turn: readonly AgentToolCall[] = [];
+  return messages.map((message) => {
+    if (message.role === 'assistant') turn = message.toolCalls ?? [];
+    if (message.role !== 'tool') return undefined;
+    const index = turn.findIndex((call) => call.id === message.toolCallId);
+    const call = turn[index];
+    return call && { call, index };
+  });
 }
 
 /** One parsed call before de-duplication: `id` may repeat within its response; `issued` is the id the provider sent. */
@@ -41,8 +45,7 @@ export function uniqueToolCalls(drafts: readonly ToolCallDraft[]): AgentToolCall
       return { id, name, input };
     }
     let unique = `${id}_${index}`;
-    while (reserved.has(unique) || held.has(unique)) unique = `${unique}_${index}`;
-    held.add(unique);
+    while (reserved.has(unique)) unique = `${unique}_${index}`;
     return { id: unique, name, input, providerId: issued ?? null };
   });
 }

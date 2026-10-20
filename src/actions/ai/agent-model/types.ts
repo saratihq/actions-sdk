@@ -14,7 +14,7 @@ export interface AgentToolCall {
   name: string;
   /** The arguments the model produced (already JSON-parsed; never a raw string). */
   input: unknown;
-  /** The id the provider issued, present only when `id` had to differ from it to stay unique; null when it issued none. */
+  /** The id the provider issued, present only where `id` alone does not say it; null when it issued none. */
   providerId?: string | null;
 }
 

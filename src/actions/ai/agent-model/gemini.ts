@@ -1,6 +1,6 @@
 import type { JsonValue } from '../../../core/http/types';
 import { asArray, asRecord } from '../generate-text';
-import { normalizeUsage, throwNoTurn, type ToolCallDraft, toolNamesById, uniqueToolCalls } from './shared';
+import { answeredCalls, normalizeUsage, throwNoTurn, type ToolCallDraft, uniqueToolCalls } from './shared';
 import type {
   AgentConversationMessage,
   AgentModelAdapter,
@@ -87,46 +87,31 @@ function functionDeclaration(tool: AgentToolSchema): JsonValue {
   };
 }
 
-/** The id Gemini issued for a buffered call, undefined when it issued none — replays {@link parseResponse}'s indexing. */
+// parseResponse gives `providerId` to an issued id equal to its own slot, so only synthesized ids match here.
 function geminiIssuedId(call: AgentToolCall, index: number): string | undefined {
   if (call.providerId !== undefined) return call.providerId ?? undefined;
   return call.id === synthesizeId(call.name, index) ? undefined : call.id;
 }
 
-/** Each buffered call id → the id Gemini issued for it; only these ids may go back on the wire. */
-function geminiIssuedIds(messages: readonly AgentConversationMessage[]): Map<string, string> {
-  const issued = new Map<string, string>();
-  for (const message of messages) {
-    if (message.role !== 'assistant' || !message.toolCalls) continue;
-    message.toolCalls.forEach((call, index) => {
-      const id = geminiIssuedId(call, index);
-      if (id !== undefined) issued.set(call.id, id);
-    });
-  }
-  return issued;
-}
-
 /** An assistant turn → a `model` content with a text part (if any) + `functionCall` parts. */
-function modelContent(message: AgentConversationMessage, issuedIds: Map<string, string>): JsonValue {
+function modelContent(message: AgentConversationMessage): JsonValue {
   const parts: JsonValue[] = [];
   if (message.content) parts.push({ text: message.content });
-  for (const call of message.toolCalls ?? []) {
+  (message.toolCalls ?? []).forEach((call, index) => {
     const functionCall: Record<string, JsonValue> = {
       name: call.name,
       args: (call.input ?? {}) as JsonValue,
     };
-    // Echo the id Gemini issued so it pairs with the functionResponse id below.
-    const issued = issuedIds.get(call.id);
+    const issued = geminiIssuedId(call, index);
     if (issued !== undefined) functionCall.id = issued;
     parts.push({ functionCall });
-  }
+  });
   return { role: 'model', parts: parts.length > 0 ? parts : [{ text: message.content }] };
 }
 
 /** Serialize the buffer to Gemini contents, merging runs of tool results into one user turn. */
 function geminiContents(messages: readonly AgentConversationMessage[]): JsonValue {
-  const names = toolNamesById(messages);
-  const issuedIds = geminiIssuedIds(messages);
+  const answered = answeredCalls(messages);
   const out: JsonValue[] = [];
   let pendingResponses: JsonValue[] = [];
   const flush = (): void => {
@@ -135,22 +120,22 @@ function geminiContents(messages: readonly AgentConversationMessage[]): JsonValu
       pendingResponses = [];
     }
   };
-  for (const message of messages) {
+  for (const [at, message] of messages.entries()) {
     if (message.role === 'tool') {
-      const id = message.toolCallId ?? '';
+      const answer = answered[at];
       const functionResponse: Record<string, JsonValue> = {
-        name: names.get(id) ?? id,
+        name: answer?.call.name ?? message.toolCallId ?? '',
         response: { result: message.content },
       };
       // Only a Gemini-issued id disambiguates same-name calls; a synthesized or de-duplicated one is ours.
-      const issued = issuedIds.get(id);
+      const issued = answer && geminiIssuedId(answer.call, answer.index);
       if (issued !== undefined) functionResponse.id = issued;
       pendingResponses.push({ functionResponse });
       continue;
     }
     flush();
     if (message.role === 'user') out.push({ role: 'user', parts: [{ text: message.content }] });
-    else out.push(modelContent(message, issuedIds));
+    else out.push(modelContent(message));
   }
   flush();
   return out;
@@ -192,7 +177,10 @@ function parseResponse(data: unknown): AgentModelResult {
       textParts.push(part.text);
     }
   }
-  const toolCalls = uniqueToolCalls(drafts);
+  const toolCalls = uniqueToolCalls(drafts).map((call, index) => {
+    const issued = drafts[index]?.issued;
+    return issued === synthesizeId(call.name, index) ? { ...call, providerId: issued } : call;
+  });
   const text = textParts.join('');
   const usage = normalizeUsage(
     data,

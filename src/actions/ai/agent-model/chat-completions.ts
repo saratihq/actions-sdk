@@ -1,11 +1,11 @@
 import type { JsonValue } from '../../../core/http/types';
 import { asArray, asRecord } from '../generate-text';
 import {
+  answeredCalls,
   normalizeUsage,
   parseToolArguments,
   throwNoTurn,
   type ToolCallDraft,
-  toolNamesById,
   uniqueToolCalls,
 } from './shared';
 import type {
@@ -19,10 +19,10 @@ import type {
 
 /** Serialize the buffer to chat-completions messages (system prepended). */
 function chatMessages(req: AgentModelRequest): JsonValue {
-  const names = toolNamesById(req.messages);
+  const answered = answeredCalls(req.messages);
   const out: JsonValue[] = [];
   if (req.system) out.push({ role: 'system', content: req.system });
-  for (const message of req.messages) {
+  for (const [at, message] of req.messages.entries()) {
     if (message.role === 'user') {
       out.push({ role: 'user', content: message.content });
     } else if (message.role === 'tool') {
@@ -31,7 +31,7 @@ function chatMessages(req: AgentModelRequest): JsonValue {
         role: 'tool',
         tool_call_id: id,
         // Mistral requires the function name on the result; OpenAI tolerates it.
-        name: names.get(id) ?? id,
+        name: answered[at]?.call.name ?? id,
         content: message.content,
       });
     } else {
