@@ -1,6 +1,6 @@
 import { ActionError } from '../../../core/errors';
 import { asRecord } from '../generate-text';
-import type { AgentConversationMessage, AgentUsage } from './types';
+import type { AgentConversationMessage, AgentToolCall, AgentUsage } from './types';
 
 /** Cross-provider serialization helpers shared by the four adapters. */
 
@@ -21,6 +21,30 @@ export function toolNamesById(messages: readonly AgentConversationMessage[]): Ma
     for (const call of message.toolCalls) names.set(call.id, call.name);
   }
   return names;
+}
+
+/** One parsed call before de-duplication: `id` may repeat within its response; `issued` is the id the provider sent. */
+export interface ToolCallDraft {
+  id: string;
+  issued: string | undefined;
+  name: string;
+  input: unknown;
+}
+
+/** Make one response's call ids unique: the first holder keeps its id; a later one appends `_<index>` until free, noting `providerId`. */
+export function uniqueToolCalls(drafts: readonly ToolCallDraft[]): AgentToolCall[] {
+  const reserved = new Set(drafts.map((draft) => draft.id));
+  const held = new Set<string>();
+  return drafts.map(({ id, issued, name, input }, index) => {
+    if (!held.has(id)) {
+      held.add(id);
+      return { id, name, input };
+    }
+    let unique = `${id}_${index}`;
+    while (reserved.has(unique) || held.has(unique)) unique = `${unique}_${index}`;
+    held.add(unique);
+    return { id: unique, name, input, providerId: issued ?? null };
+  });
 }
 
 /** Parse a provider's JSON-string tool arguments to a value; fall back to the raw string. */

@@ -1,12 +1,18 @@
 import type { JsonValue } from '../../../core/http/types';
 import { asArray, asRecord } from '../generate-text';
-import { normalizeUsage, parseToolArguments, throwNoTurn, toolNamesById } from './shared';
+import {
+  normalizeUsage,
+  parseToolArguments,
+  throwNoTurn,
+  type ToolCallDraft,
+  toolNamesById,
+  uniqueToolCalls,
+} from './shared';
 import type {
   AgentConversationMessage,
   AgentModelAdapter,
   AgentModelRequest,
   AgentModelResult,
-  AgentToolCall,
 } from './types';
 
 /** The OpenAI / Mistral `/chat/completions` tool-calling shape — both APIs are identical here. */
@@ -79,18 +85,16 @@ function buildBody(req: AgentModelRequest): JsonValue {
 function parseResponse(data: unknown): AgentModelResult {
   const message = asRecord(asRecord(asArray(asRecord(data)?.choices)?.[0])?.message);
   if (!message) throwNoTurn('openai-chat');
-  const toolCalls: AgentToolCall[] = [];
+  const drafts: ToolCallDraft[] = [];
   for (const raw of asArray(message.tool_calls) ?? []) {
     const call = asRecord(raw);
     const fn = asRecord(call?.function);
     if (fn && typeof fn.name === 'string') {
-      toolCalls.push({
-        id: typeof call?.id === 'string' ? call.id : fn.name,
-        name: fn.name,
-        input: parseToolArguments(fn.arguments),
-      });
+      const issued = typeof call?.id === 'string' ? call.id : undefined;
+      drafts.push({ id: issued ?? fn.name, issued, name: fn.name, input: parseToolArguments(fn.arguments) });
     }
   }
+  const toolCalls = uniqueToolCalls(drafts);
   const text = typeof message.content === 'string' ? message.content : '';
   const usage = normalizeUsage(data, 'usage', 'prompt_tokens', 'completion_tokens', 'total_tokens');
   return { ...(text ? { text } : {}), toolCalls, ...(usage ? { usage } : {}) };

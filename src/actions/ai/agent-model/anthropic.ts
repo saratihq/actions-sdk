@@ -1,12 +1,11 @@
 import type { JsonValue } from '../../../core/http/types';
 import { asArray, asRecord } from '../generate-text';
-import { normalizeUsage, throwNoTurn } from './shared';
+import { normalizeUsage, throwNoTurn, type ToolCallDraft, uniqueToolCalls } from './shared';
 import type {
   AgentConversationMessage,
   AgentModelAdapter,
   AgentModelRequest,
   AgentModelResult,
-  AgentToolCall,
 } from './types';
 
 /** Anthropic Messages API tool use: `tool_result` blocks must ride INSIDE a user turn. */
@@ -73,18 +72,16 @@ function parseResponse(data: unknown): AgentModelResult {
   const content = asArray(asRecord(data)?.content);
   if (!content) throwNoTurn('claude');
   const textParts: string[] = [];
-  const toolCalls: AgentToolCall[] = [];
+  const drafts: ToolCallDraft[] = [];
   for (const raw of content) {
     const block = asRecord(raw);
     if (block?.type === 'text' && typeof block.text === 'string') textParts.push(block.text);
     else if (block?.type === 'tool_use' && typeof block.name === 'string') {
-      toolCalls.push({
-        id: typeof block.id === 'string' ? block.id : block.name,
-        name: block.name,
-        input: block.input ?? {},
-      });
+      const issued = typeof block.id === 'string' ? block.id : undefined;
+      drafts.push({ id: issued ?? block.name, issued, name: block.name, input: block.input ?? {} });
     }
   }
+  const toolCalls = uniqueToolCalls(drafts);
   const text = textParts.join('');
   const usage = normalizeUsage(data, 'usage', 'input_tokens', 'output_tokens', 'total_tokens');
   return { ...(text ? { text } : {}), toolCalls, ...(usage ? { usage } : {}) };
