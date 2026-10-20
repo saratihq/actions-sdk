@@ -42,6 +42,8 @@ export interface ProviderConfig<TBody extends JsonValue = JsonValue> {
   defaultMaxTokens?: (model: string) => number;
   /** Non-secret headers this provider requires on every call (e.g. anthropic-version). */
   extraHeaders?: Record<string, string>;
+  /** Per-request timeout of the model call; unset, the HTTP client's default. */
+  timeoutMs?: number;
   /** The POST URL — some providers (Gemini) put the model in the path. */
   buildUrl(input: GenerateInput): string;
   /** The provider-shaped JSON request body. */
@@ -108,6 +110,7 @@ export function makeGenerateText<TBody extends JsonValue>(config: ProviderConfig
           auth,
           ...(config.extraHeaders ? { headers: config.extraHeaders } : {}),
           body,
+          timeoutMs: config.timeoutMs,
         });
         return res.data;
       };

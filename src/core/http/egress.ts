@@ -16,6 +16,8 @@ import {
 const PROXY_VARS = ['http_proxy', 'HTTP_PROXY', 'https_proxy', 'HTTPS_PROXY', 'no_proxy', 'NO_PROXY'];
 // A proxy that will not connect or answer a tunnel request within this gives up well inside a request's own budget.
 const PROXY_TIMEOUT_MS = 10_000;
+// Every request carries the HttpClient's own deadline; undici's 300 s defaults would cut a long model call short.
+const REQUEST_TIMERS = { headersTimeout: 0, bodyTimeout: 0 };
 
 interface Proxy {
   pool: Pool;
@@ -246,13 +248,14 @@ function proxiedConnector(
 
 function createEgress(key: string, proxied: boolean): Egress {
   if (!proxied) {
-    const dispatcher = new Agent({ connect: directConnector() });
+    const dispatcher = new Agent({ ...REQUEST_TIMERS, connect: directConnector() });
     return { key, dispatcher, close: () => dispatcher.close() };
   }
   const httpProxy = proxyFor('HTTP_PROXY', envValue('http_proxy', 'HTTP_PROXY'));
   const httpsProxy = proxyFor('HTTPS_PROXY', envValue('https_proxy', 'HTTPS_PROXY')) ?? httpProxy;
   const noProxy = parseNoProxy(process.env.no_proxy ?? process.env.NO_PROXY ?? '');
   const dispatcher = new Agent({
+    ...REQUEST_TIMERS,
     connect: proxiedConnector({ 'http:': httpProxy, 'https:': httpsProxy }, noProxy),
   });
   const pools = [...new Set([httpProxy, httpsProxy])].flatMap((proxy) => (proxy ? [proxy.pool] : []));

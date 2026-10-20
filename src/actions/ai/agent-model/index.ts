@@ -1,10 +1,10 @@
 import type { ApiKeyScheme, AuthHandle } from '../../../core/auth';
 import { ActionError } from '../../../core/errors';
 import type { HttpClient } from '../../../core/http/client';
-import { claudeAuth } from '../claude';
-import { geminiAuth } from '../gemini';
-import { mistralAuth } from '../mistral';
-import { openaiAuth } from '../openai';
+import { claudeAuth, claudeTimeoutMs } from '../claude';
+import { geminiAuth, geminiTimeoutMs } from '../gemini';
+import { mistralAuth, mistralTimeoutMs } from '../mistral';
+import { openaiAuth, openaiTimeoutMs } from '../openai';
 import { anthropicAgentAdapter } from './anthropic';
 import { mistralAgentAdapter, openaiAgentAdapter } from './chat-completions';
 import { geminiAgentAdapter } from './gemini';
@@ -17,6 +17,13 @@ const ADAPTERS: Record<AgentProvider, AgentModelAdapter> = {
   openai: openaiAgentAdapter,
   mistral: mistralAgentAdapter,
   gemini: geminiAgentAdapter,
+};
+
+const TIMEOUT_MS: Record<AgentProvider, number> = {
+  claude: claudeTimeoutMs,
+  openai: openaiTimeoutMs,
+  mistral: mistralTimeoutMs,
+  gemini: geminiTimeoutMs,
 };
 
 /** Generate one agent turn against `req.provider`; throws `invalid_input` for an unknown provider. */
@@ -37,6 +44,7 @@ export async function callAgentModel(
     auth,
     ...(adapter.extraHeaders ? { headers: adapter.extraHeaders } : {}),
     body: adapter.buildBody(req),
+    timeoutMs: TIMEOUT_MS[req.provider],
   });
   return adapter.parseResponse(res.data);
 }

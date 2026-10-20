@@ -169,6 +169,36 @@ describe('claude.generate_text', () => {
     expect(body.max_tokens).toBe(1024);
   });
 
+  it.each([
+    ['claude-opus-4-8', 1024],
+    ['claude-sonnet-5', 21_333],
+    ['claude-haiku-4-5-20251001', 1024],
+    ['claude-9-unlisted', 21_333],
+  ])('sends %s a blank Max tokens as %i', async (model, maxTokens) => {
+    const { auth, http, transport } = fake(constant({ content: [{ type: 'text', text: 'ok' }] }));
+    await claudeGenerateText.execute({ auth, http, props: { prompt: 'x', model } });
+    expect(transport.requests[0]!.body).toEqual({
+      model,
+      max_tokens: maxTokens,
+      messages: [{ role: 'user', content: 'x' }],
+    });
+  });
+
+  it('offers the same three models and leaves Max tokens blank, since its default depends on the model', () => {
+    expect(claudeGenerateText.props.model.defaultValue).toBe('claude-opus-4-8');
+    expect(claudeGenerateText.props.model.options).toEqual(
+      ['claude-opus-4-8', 'claude-sonnet-5', 'claude-haiku-4-5-20251001'].map((m) => ({
+        label: m,
+        value: m,
+      })),
+    );
+    const maxTokens = claudeGenerateText.toManifest().props.maxTokens!;
+    expect(maxTokens).not.toHaveProperty('defaultValue');
+    expect(maxTokens.description).toBe(
+      "Upper bound on tokens to generate; leave blank for the model's default.",
+    );
+  });
+
   it.each([undefined, 'end_turn', 'refusal'])(
     'reports missing text when no text block is present and the stop reason is %s',
     async (stopReason) => {
@@ -285,7 +315,7 @@ describe('gemini.generate_text', () => {
     expect(maxTokens.description).toBe(
       "Upper bound on tokens to generate; leave blank for the model's default.",
     );
-    for (const action of [openaiGenerateText, claudeGenerateText, mistralGenerateText]) {
+    for (const action of [openaiGenerateText, mistralGenerateText]) {
       expect(action.toManifest().props.maxTokens).toMatchObject({
         description: 'Upper bound on tokens to generate.',
         defaultValue: 1024,
@@ -367,6 +397,14 @@ describe('generate_text run directly, without the props defaults', () => {
       { candidates: [{ content: { parts: [{ text: 'ok' }] } }] },
       'generationConfig',
       { maxOutputTokens: 32_768 },
+    ],
+    [
+      'claude',
+      claudeGenerateText,
+      'claude-sonnet-5',
+      { content: [{ type: 'text', text: 'ok' }] },
+      'max_tokens',
+      21_333,
     ],
   ])('%s sends its default Max tokens when none is passed', async (_, action, model, data, field, value) => {
     const { auth, http, transport } = fake(constant(data));

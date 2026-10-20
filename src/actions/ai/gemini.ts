@@ -18,6 +18,9 @@ export const geminiAuth: ApiKeyScheme = {
   name: 'key',
 };
 
+/** Per-request timeout of a Gemini model call, each long-decode hop its own: the 20 minutes Google advises. */
+export const geminiTimeoutMs = 1_200_000;
+
 type GeminiBody = { [key: string]: JsonValue };
 
 // gemini-4-argon takes at most 32,768 per non-streaming REST call; above that the call 400s or long-decodes.
@@ -118,6 +121,7 @@ export const geminiGenerateText = makeGenerateText({
   defaultModel: 'gemini-3.6-flash',
   models: Object.keys(MODEL_MAX_TOKENS),
   defaultMaxTokens: (model) => MODEL_MAX_TOKENS[model] ?? REST_REQUEST_CAP,
+  timeoutMs: geminiTimeoutMs,
   buildUrl: (input) =>
     `https://generativelanguage.googleapis.com/v1beta/models/${input.model}:generateContent`,
   buildBody: geminiBody,

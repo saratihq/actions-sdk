@@ -23,6 +23,20 @@ export class FakeTransport implements Transport {
   }
 }
 
+/** A {@link Transport} that gives `answers` in turn, then never answers, so only a request's own deadline ends it. */
+export class StalledTransport implements Transport {
+  readonly kind = 'stalled';
+  readonly requests: NormalizedRequest[] = [];
+
+  constructor(private readonly answers: readonly NormalizedResponse[] = []) {}
+
+  send(request: NormalizedRequest): Promise<NormalizedResponse> {
+    const answer = this.answers[this.requests.length];
+    this.requests.push(request);
+    return answer ? Promise.resolve(answer) : new Promise(() => undefined);
+  }
+}
+
 /** Wrap a transport in an opaque auth handle for tests (scheme label is arbitrary). */
 export function stubAuth(transport: Transport, scheme: AuthHandle['scheme'] = 'none'): AuthHandle {
   return createAuthHandle(scheme, transport);

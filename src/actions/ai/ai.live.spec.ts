@@ -82,29 +82,38 @@ liveDescribe('ai — live generate_text via direct transport', () => {
     30_000,
   );
 
-  (geminiKey ? it : it.skip).each([geminiGenerateText.props.model.defaultValue!, 'gemini-4-argon'])(
-    'gemini.generate_text finishes a ~300-word answer on %s at its default Max tokens',
-    async (model) => {
-      const auth: AuthHandle = createDirectAuth(geminiGenerateText.auth, {
-        type: 'apiKey',
-        value: geminiKey ?? '',
-      });
-      const out = await geminiGenerateText.execute({
-        auth,
-        http,
-        props: {
-          prompt: 'In about 300 words, explain why the sky is blue and why sunsets are red.',
-          model,
-        },
-      });
-      const words = out.text.trim().split(/\s+/).length;
-      console.log(
-        `live: gemini.generate_text, ~300 words on ${model} at its default Max tokens → ${words} words`,
-      );
-      expect(words).toBeGreaterThan(150);
-    },
-    120_000,
-  );
+  // A 1 s client default, so only the action's own model-call timeout lets these answers finish.
+  const impatient = new HttpClient({ defaultTimeoutMs: 1_000 });
+  const longAnswers = [
+    { action: geminiGenerateText, key: geminiKey, model: geminiGenerateText.props.model.defaultValue! },
+    { action: geminiGenerateText, key: geminiKey, model: 'gemini-4-argon' },
+    { action: claudeGenerateText, key: anthropicKey, model: 'claude-sonnet-5' },
+  ];
+  for (const { action, key, model } of longAnswers) {
+    (key ? it : it.skip)(
+      `${action.type} finishes a ~300-word answer on ${model} at its default Max tokens, past a 1 s client default`,
+      async () => {
+        const auth: AuthHandle = createDirectAuth(action.auth, { type: 'apiKey', value: key ?? '' });
+        const started = Date.now();
+        const out = await action.execute({
+          auth,
+          http: impatient,
+          props: {
+            prompt: 'In about 300 words, explain why the sky is blue and why sunsets are red.',
+            model,
+          },
+        });
+        const elapsed = Date.now() - started;
+        const words = out.text.trim().split(/\s+/).length;
+        console.log(
+          `live: ${action.type}, ~300 words on ${model} at its default Max tokens → ${words} words in ${elapsed} ms`,
+        );
+        expect(words).toBeGreaterThan(150);
+        expect(elapsed).toBeGreaterThan(1_000);
+      },
+      120_000,
+    );
+  }
 
   (geminiKey ? it : it.skip)(
     'gemini.generate_text fails naming Max tokens when thinking uses the whole budget',

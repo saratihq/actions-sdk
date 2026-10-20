@@ -10,6 +10,9 @@ export const openaiAuth: ApiKeyScheme = {
   prefix: 'Bearer ',
 };
 
+/** Per-request timeout of an OpenAI model call: the 10 minutes OpenAI's own SDK waits. */
+export const openaiTimeoutMs = 600_000;
+
 /** `openai.generate_text` — generate text with an OpenAI chat model. */
 export const openaiGenerateText = makeGenerateText({
   slug: 'openai',
@@ -19,6 +22,7 @@ export const openaiGenerateText = makeGenerateText({
   // Chat models only — o-series reasoning models 400 against the shared body (no `max_tokens`/`temperature`).
   defaultModel: 'gpt-4o',
   models: ['gpt-4o', 'gpt-4o-mini', 'gpt-4.1', 'gpt-4.1-mini'],
+  timeoutMs: openaiTimeoutMs,
   buildUrl: () => 'https://api.openai.com/v1/chat/completions',
   buildBody: chatCompletionBody,
   extractText: (data) => extractChatCompletionText(data, 'openai'),
