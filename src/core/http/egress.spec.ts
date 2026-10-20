@@ -8,6 +8,14 @@ import {
 import { createDirectAuth } from '../auth-factories';
 import { HttpClient } from './client';
 
+// A second at a time, yielding to I/O between, so the response reaches undici as it would in real time.
+async function elapse(ms: number): Promise<void> {
+  for (let at = 0; at < ms; at += 1_000) {
+    await jest.advanceTimersByTimeAsync(1_000);
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+}
+
 // Fake timers before undici's first request in this file, so its own timer clock runs on them too.
 describe('egress — a request waits on the server until its own deadline', () => {
   let server: LoopbackServer;
@@ -64,7 +72,7 @@ describe('egress — a request waits on the server until its own deadline', () =
     ['through an env proxy', 'sends nothing back', '/no-headers'],
     ['through an env proxy', 'sends headers, then stalls the body', '/stalled-body'],
   ] as const)(
-    "sent %s, outlives undici's 300 s defaults when the server %s, and ends at its own 600 s timeout, sent once",
+    "sent %s to a server that %s, still waits at 599 s, past undici's 300 s defaults, and ends at its own 600 s timeout, sent once",
     async (via, _, path) => {
       const { origin, env } = route[via]();
       const before = server.hits.length;
@@ -87,9 +95,9 @@ describe('egress — a request waits on the server until its own deadline', () =
             settled = true;
           });
         await arrived;
-        await jest.advanceTimersByTimeAsync(301_000);
+        await elapse(599_000);
         expect(settled).toBe(false);
-        await jest.advanceTimersByTimeAsync(299_000);
+        await elapse(1_000);
         await expect(outcome).resolves.toMatchObject({
           code: 'transport_timeout',
           message: 'request timed out after 600000ms',
