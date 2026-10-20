@@ -5,7 +5,7 @@ import {
   asRecord,
   type GenerateInput,
   makeGenerateText,
-  throwNoText,
+  requireText,
   usageField,
 } from './generate-text';
 
@@ -37,10 +37,14 @@ function claudeBody(input: GenerateInput): JsonValue {
 
 /** Extract the first `text` block from the `content` array, or throw. */
 function extractClaudeText(data: unknown): string {
-  const block = asArray(asRecord(data)?.content)?.find((b) => asRecord(b)?.type === 'text');
+  const response = asRecord(data);
+  const block = asArray(response?.content)?.find((b) => asRecord(b)?.type === 'text');
   const text = asRecord(block)?.text;
-  if (typeof text !== 'string') throwNoText('claude');
-  return text;
+  return requireText(
+    'claude',
+    typeof text === 'string' ? text : undefined,
+    response?.stop_reason === 'max_tokens',
+  );
 }
 
 /** `claude.generate_text` — generate text with an Anthropic Claude model. */

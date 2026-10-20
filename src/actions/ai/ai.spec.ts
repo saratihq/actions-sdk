@@ -169,12 +169,21 @@ describe('claude.generate_text', () => {
     expect(body.max_tokens).toBe(1024);
   });
 
-  it('throws provider_error when no text block is present', async () => {
-    const { auth, http } = fake(constant({ content: [{ type: 'thinking', thinking: 'x' }] }));
-    await expect(
-      claudeGenerateText.execute({ auth, http, props: { prompt: 'x', model: 'claude-opus-4-8' } }),
-    ).rejects.toMatchObject({ code: 'provider_error' });
-  });
+  it.each([undefined, 'end_turn', 'refusal'])(
+    'reports missing text when no text block is present and the stop reason is %s',
+    async (stopReason) => {
+      const { auth, http } = fake(
+        constant({ content: [{ type: 'thinking', thinking: 'x' }], stop_reason: stopReason }),
+      );
+      await expect(
+        claudeGenerateText.execute({ auth, http, props: { prompt: 'x', model: 'claude-opus-4-8' } }),
+      ).rejects.toMatchObject({
+        code: 'provider_error',
+        retryable: false,
+        message: 'claude: response did not contain generated text',
+      });
+    },
+  );
 });
 
 describe('gemini.generate_text', () => {
@@ -221,7 +230,7 @@ describe('gemini.generate_text', () => {
     expect(body.generationConfig.responseMimeType).toBe('application/json');
   });
 
-  it('omits systemInstruction and responseMimeType when unset, and caps output at the model limit thinking counts toward', async () => {
+  it('omits systemInstruction and responseMimeType when unset', async () => {
     const { auth, http, transport } = fake(
       constant({
         candidates: [{ content: { parts: [{ text: 'ok' }] } }],
@@ -242,8 +251,46 @@ describe('gemini.generate_text', () => {
     };
     expect(body.systemInstruction).toBeUndefined();
     expect(body.generationConfig.responseMimeType).toBeUndefined();
-    expect(body.generationConfig.maxOutputTokens).toBe(65_536);
-    expect(geminiGenerateText.props.maxTokens.defaultValue).toBe(65_536);
+  });
+
+  it.each([
+    ['gemini-3.6-flash', 65_536],
+    ['gemini-3.8-flash', 65_536],
+    ['gemini-3.5-flash-lite', 65_536],
+    ['gemini-4-argon', 32_768],
+    ['gemini-9-unlisted', 32_768],
+  ])('sends %s a blank Max tokens as %i', async (model, maxOutputTokens) => {
+    const { auth, http, transport } = fake(
+      constant({ candidates: [{ content: { parts: [{ text: 'ok' }] }, finishReason: 'STOP' }] }),
+    );
+    await geminiGenerateText.execute({ auth, http, props: { prompt: 'x', model } });
+    expect(transport.requests[0]!.url).toBe(
+      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,
+    );
+    expect(transport.requests[0]!.body).toEqual({
+      contents: [{ role: 'user', parts: [{ text: 'x' }] }],
+      generationConfig: { maxOutputTokens },
+    });
+  });
+
+  it('offers the four models and leaves Max tokens blank, since its default depends on the model', () => {
+    expect(geminiGenerateText.props.model.options).toEqual(
+      ['gemini-3.6-flash', 'gemini-3.8-flash', 'gemini-3.5-flash-lite', 'gemini-4-argon'].map((m) => ({
+        label: m,
+        value: m,
+      })),
+    );
+    const maxTokens = geminiGenerateText.toManifest().props.maxTokens!;
+    expect(maxTokens).not.toHaveProperty('defaultValue');
+    expect(maxTokens.description).toBe(
+      "Upper bound on tokens to generate; leave blank for the model's default.",
+    );
+    for (const action of [openaiGenerateText, claudeGenerateText, mistralGenerateText]) {
+      expect(action.toManifest().props.maxTokens).toMatchObject({
+        description: 'Upper bound on tokens to generate.',
+        defaultValue: 1024,
+      });
+    }
   });
 
   it('throws provider_error when candidates are empty', async () => {
@@ -269,35 +316,24 @@ describe('gemini.generate_text', () => {
   });
 
   it.each([
-    ['no parts', { role: 'model' }],
-    ['an empty signed text part', { role: 'model', parts: [{ text: '', thoughtSignature: 'c2ln' }] }],
-  ])(
-    'fails naming Max tokens and thinking when the candidate stopped at MAX_TOKENS with %s',
-    async (_, content) => {
-      const { auth, http } = fake(
-        constant({
-          candidates: [{ content, finishReason: 'MAX_TOKENS' }],
-          usageMetadata: { promptTokenCount: 2100, thoughtsTokenCount: 1024, totalTokenCount: 3124 },
-        }),
-      );
-      await expect(
-        geminiGenerateText.execute({
-          auth,
-          http,
-          props: {
-            prompt: 'Summarize this article in about 300 words.',
-            model: 'gemini-3.6-flash',
-            maxTokens: 1024,
-          },
-        }),
-      ).rejects.toMatchObject({
-        code: 'provider_error',
-        retryable: false,
-        message:
-          'gemini: thinking used the whole Max tokens budget before any text was written; thinking counts toward Max tokens, so raise it',
-      });
-    },
-  );
+    [
+      'a signed empty part before it',
+      [{ text: '', thoughtSignature: 'c2ln' }, { text: 'The answer' }],
+      'MAX_TOKENS',
+    ],
+    ['a thought part before it', [{ text: 'Weighing it up', thought: true }, { text: 'The answer' }], 'STOP'],
+    ['the text split across parts', [{ text: 'The ' }, { text: 'answer' }], 'STOP'],
+  ])('returns the text with %s', async (_, parts, finishReason) => {
+    const { auth, http } = fake(
+      constant({ candidates: [{ content: { role: 'model', parts }, finishReason }] }),
+    );
+    const out = await geminiGenerateText.execute({
+      auth,
+      http,
+      props: { prompt: 'x', model: 'gemini-3.6-flash' },
+    });
+    expect(out).toEqual({ text: 'The answer', model: 'gemini-3.6-flash' });
+  });
 
   it.each(['STOP', 'SAFETY'])(
     'still reports missing text when a candidate with no text stopped at %s',
@@ -312,6 +348,199 @@ describe('gemini.generate_text', () => {
       });
     },
   );
+});
+
+describe('generate_text run directly, without the props defaults', () => {
+  it.each([
+    [
+      'openai',
+      openaiGenerateText,
+      'gpt-4o',
+      { choices: [{ message: { content: 'ok' } }] },
+      'max_tokens',
+      1024,
+    ],
+    [
+      'gemini',
+      geminiGenerateText,
+      'gemini-4-argon',
+      { candidates: [{ content: { parts: [{ text: 'ok' }] } }] },
+      'generationConfig',
+      { maxOutputTokens: 32_768 },
+    ],
+  ])('%s sends its default Max tokens when none is passed', async (_, action, model, data, field, value) => {
+    const { auth, http, transport } = fake(constant(data));
+    await action.run({
+      auth,
+      http,
+      props: {
+        prompt: 'x',
+        model,
+        system: undefined,
+        temperature: undefined,
+        maxTokens: undefined,
+        jsonOutput: undefined,
+      },
+    });
+    expect((transport.requests[0]!.body as Record<string, unknown>)[field]).toEqual(value);
+  });
+});
+
+describe('gemini.generate_text long decode', () => {
+  const props = { prompt: 'Write the full report.', model: 'gemini-4-argon', maxTokens: 262_144 };
+  const firstBody = {
+    contents: [{ role: 'user', parts: [{ text: 'Write the full report.' }] }],
+    generationConfig: { maxOutputTokens: 262_144 },
+  };
+  const hop = (parts: unknown[], finishReason: string, extra: Record<string, unknown> = {}) => ({
+    candidates: [{ content: { role: 'model', parts }, finishReason, ...extra }],
+  });
+  const replay = (hops: unknown[]) => fake((_, i) => ({ status: 200, headers: {}, data: hops[i] }));
+
+  it('resends the same body with each CONTINUATION token, then joins the hops and sums their usage', async () => {
+    const { auth, http, transport } = replay([
+      {
+        ...hop([{ text: '' }], 'CONTINUATION', { continuationToken: 't1' }),
+        usageMetadata: { promptTokenCount: 10, thoughtsTokenCount: 32_768, totalTokenCount: 32_778 },
+      },
+      {
+        ...hop([{ text: 'Part one, ' }], 'CONTINUATION', { continuationToken: 't2' }),
+        usageMetadata: { promptTokenCount: 10, candidatesTokenCount: 32_768, totalTokenCount: 32_778 },
+      },
+      {
+        ...hop([{ text: 'part two.' }], 'STOP'),
+        usageMetadata: { promptTokenCount: 10, candidatesTokenCount: 5, totalTokenCount: 15 },
+      },
+    ]);
+    const out = await geminiGenerateText.execute({ auth, http, props });
+    expect(transport.requests.map((r) => r.body)).toEqual([
+      firstBody,
+      { ...firstBody, continuationToken: 't1' },
+      { ...firstBody, continuationToken: 't2' },
+    ]);
+    expect(new Set(transport.requests.map((r) => r.url)).size).toBe(1);
+    expect(out).toEqual({
+      text: 'Part one, part two.',
+      model: 'gemini-4-argon',
+      usage: {
+        promptTokenCount: 30,
+        thoughtsTokenCount: 32_768,
+        candidatesTokenCount: 32_773,
+        totalTokenCount: 65_571,
+      },
+    });
+  });
+
+  it('stops at a MAX_TOKENS hop although it carries a token, and fails naming Max tokens when no text came', async () => {
+    const { auth, http, transport } = replay([
+      hop([{ text: '' }], 'CONTINUATION', { continuationToken: 't1' }),
+      hop([{ text: '' }], 'MAX_TOKENS', { continuationToken: 't2' }),
+    ]);
+    await expect(geminiGenerateText.execute({ auth, http, props })).rejects.toMatchObject({
+      code: 'provider_error',
+      retryable: false,
+      message:
+        'gemini: thinking used the whole Max tokens budget before any text was written; thinking counts toward Max tokens, so raise it',
+    });
+    expect(transport.requests).toHaveLength(2);
+  });
+
+  it('returns the text it got when the last hop stops at MAX_TOKENS, without usage none of the hops sent', async () => {
+    const { auth, http, transport } = replay([
+      hop([{ text: '' }], 'CONTINUATION', { continuationToken: 't1' }),
+      hop([{ text: 'The report so' }], 'MAX_TOKENS', { continuationToken: 't2' }),
+    ]);
+    const out = await geminiGenerateText.execute({ auth, http, props });
+    expect(out).toEqual({ text: 'The report so', model: 'gemini-4-argon' });
+    expect(transport.requests).toHaveLength(2);
+  });
+
+  it.each([
+    ['no token', {}],
+    ['an empty token', { continuationToken: '' }],
+  ])('fails instead of returning part of the answer when a CONTINUATION hop has %s', async (_, extra) => {
+    const { auth, http, transport } = replay([hop([{ text: 'Part one, ' }], 'CONTINUATION', extra)]);
+    await expect(geminiGenerateText.execute({ auth, http, props })).rejects.toMatchObject({
+      code: 'provider_error',
+      retryable: false,
+      message:
+        'gemini: a CONTINUATION response carried no continuation token, so the rest of the answer cannot be fetched',
+    });
+    expect(transport.requests).toHaveLength(1);
+  });
+});
+
+describe('generate_text when thinking used the whole Max tokens', () => {
+  it.each([
+    [
+      'gemini',
+      'no parts',
+      geminiGenerateText,
+      'gemini-3.6-flash',
+      { candidates: [{ content: { role: 'model' }, finishReason: 'MAX_TOKENS' }] },
+    ],
+    [
+      'gemini',
+      'a signed empty text part',
+      geminiGenerateText,
+      'gemini-3.6-flash',
+      {
+        candidates: [
+          {
+            content: { role: 'model', parts: [{ text: '', thoughtSignature: 'c2ln' }] },
+            finishReason: 'MAX_TOKENS',
+          },
+        ],
+      },
+    ],
+    [
+      'gemini',
+      'only a thought part',
+      geminiGenerateText,
+      'gemini-3.6-flash',
+      {
+        candidates: [
+          {
+            content: { role: 'model', parts: [{ text: 'Weighing it up', thought: true }] },
+            finishReason: 'MAX_TOKENS',
+          },
+        ],
+      },
+    ],
+    [
+      'claude',
+      'only a thinking block',
+      claudeGenerateText,
+      'claude-sonnet-5',
+      { content: [{ type: 'thinking', thinking: '', signature: 'c2ln' }], stop_reason: 'max_tokens' },
+    ],
+    [
+      'claude',
+      'an empty text block',
+      claudeGenerateText,
+      'claude-sonnet-5',
+      {
+        content: [
+          { type: 'thinking', thinking: '', signature: 'c2ln' },
+          { type: 'text', text: '' },
+        ],
+        stop_reason: 'max_tokens',
+      },
+    ],
+  ])('%s fails naming Max tokens and thinking with %s', async (slug, _, action, model, data) => {
+    const { auth, http } = fake(constant(data));
+    await expect(
+      action.execute({
+        auth,
+        http,
+        props: { prompt: 'Write a 300-word analysis of this report.', model, maxTokens: 1024 },
+      }),
+    ).rejects.toMatchObject({
+      code: 'provider_error',
+      retryable: false,
+      message: `${slug}: thinking used the whole Max tokens budget before any text was written; thinking counts toward Max tokens, so raise it`,
+    });
+  });
 });
 
 describe('generate_text cut off at Max tokens', () => {

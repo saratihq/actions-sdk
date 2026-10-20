@@ -82,9 +82,9 @@ liveDescribe('ai — live generate_text via direct transport', () => {
     30_000,
   );
 
-  (geminiKey ? it : it.skip)(
-    'gemini.generate_text finishes a ~300-word answer at the default model and Max tokens',
-    async () => {
+  (geminiKey ? it : it.skip).each([geminiGenerateText.props.model.defaultValue!, 'gemini-4-argon'])(
+    'gemini.generate_text finishes a ~300-word answer on %s at its default Max tokens',
+    async (model) => {
       const auth: AuthHandle = createDirectAuth(geminiGenerateText.auth, {
         type: 'apiKey',
         value: geminiKey ?? '',
@@ -94,11 +94,13 @@ liveDescribe('ai — live generate_text via direct transport', () => {
         http,
         props: {
           prompt: 'In about 300 words, explain why the sky is blue and why sunsets are red.',
-          model: geminiGenerateText.props.model.defaultValue!,
+          model,
         },
       });
       const words = out.text.trim().split(/\s+/).length;
-      console.log(`live: gemini.generate_text, ~300 words at the defaults → ${words} words`);
+      console.log(
+        `live: gemini.generate_text, ~300 words on ${model} at its default Max tokens → ${words} words`,
+      );
       expect(words).toBeGreaterThan(150);
     },
     120_000,

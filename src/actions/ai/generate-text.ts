@@ -6,6 +6,8 @@ import { checkbox, dropdown, longText, number } from '../../core/props';
 
 /** The "generate text" family: one prompt-in / text-out action per LLM provider, from a single factory. */
 
+const DEFAULT_MAX_TOKENS = 1024;
+
 /** The uniform output every provider returns. */
 export interface GenerateTextOutput {
   text: string;
@@ -19,14 +21,14 @@ export interface GenerateInput {
   system?: string;
   model: string;
   temperature?: number;
-  /** Always resolved (defaults to the provider's {@link ProviderConfig.defaultMaxTokens}). */
+  /** Always resolved (defaults to the provider's {@link ProviderConfig.defaultMaxTokens} for the model, else 1024). */
   maxTokens: number;
   /** Always resolved (defaults to false). */
   jsonOutput: boolean;
 }
 
 /** What a single provider contributes on top of the shared shape. */
-export interface ProviderConfig {
+export interface ProviderConfig<TBody extends JsonValue = JsonValue> {
   /** Catalog slug — also the brand icon key. One of: openai | claude | gemini | mistral. */
   slug: string;
   name: string;
@@ -36,14 +38,16 @@ export interface ProviderConfig {
   defaultModel: string;
   /** Static model options offered by this provider. */
   models: readonly string[];
-  /** Pre-filled `Max tokens`, and the cap sent when it is unset; 1024 when omitted. */
-  defaultMaxTokens?: number;
+  /** `Max tokens` for a model when the step leaves it blank; set, the field has no pre-fill, else it pre-fills 1024. */
+  defaultMaxTokens?: (model: string) => number;
   /** Non-secret headers this provider requires on every call (e.g. anthropic-version). */
   extraHeaders?: Record<string, string>;
   /** The POST URL — some providers (Gemini) put the model in the path. */
   buildUrl(input: GenerateInput): string;
   /** The provider-shaped JSON request body. */
-  buildBody(input: GenerateInput): JsonValue;
+  buildBody(input: GenerateInput): TBody;
+  /** Make the call through `post` and return the response to read; defaults to one POST of the body. */
+  send?: (post: (body: TBody) => Promise<unknown>, body: TBody) => Promise<unknown>;
   /** Pull the generated text out of the (unknown) response, or throw. Never returns undefined. */
   extractText(data: unknown): string;
   /** Pull the provider's usage/metadata block, if any. */
@@ -51,8 +55,12 @@ export interface ProviderConfig {
 }
 
 /** Build one provider's `<slug>.generate_text` action; every provider has the same props, only some defaults differ. */
-export function makeGenerateText(config: ProviderConfig) {
-  const defaultMaxTokens = config.defaultMaxTokens ?? 1024;
+export function makeGenerateText<TBody extends JsonValue>(config: ProviderConfig<TBody>) {
+  const defaultMaxTokens = config.defaultMaxTokens ?? (() => DEFAULT_MAX_TOKENS);
+  const maxTokensField = config.defaultMaxTokens
+    ? { description: "Upper bound on tokens to generate; leave blank for the model's default." }
+    : { description: 'Upper bound on tokens to generate.', defaultValue: DEFAULT_MAX_TOKENS };
+  const send = config.send ?? ((post: (body: TBody) => Promise<unknown>, body: TBody) => post(body));
   return defineAction({
     type: `${config.slug}.generate_text`,
     name: config.name,
@@ -77,12 +85,7 @@ export function makeGenerateText(config: ProviderConfig) {
         description: 'Sampling temperature; higher is more random.',
         required: false,
       }),
-      maxTokens: number({
-        label: 'Max tokens',
-        description: 'Upper bound on tokens to generate.',
-        required: false,
-        defaultValue: defaultMaxTokens,
-      }),
+      maxTokens: number({ label: 'Max tokens', required: false, ...maxTokensField }),
       jsonOutput: checkbox({
         label: 'JSON output',
         description: 'Ask the model to return valid JSON.',
@@ -96,16 +99,21 @@ export function makeGenerateText(config: ProviderConfig) {
         ...(props.system !== undefined ? { system: props.system } : {}),
         model: props.model,
         ...(props.temperature !== undefined ? { temperature: props.temperature } : {}),
-        maxTokens: props.maxTokens ?? defaultMaxTokens,
+        maxTokens: props.maxTokens ?? defaultMaxTokens(props.model),
         jsonOutput: props.jsonOutput ?? false,
       };
-      const res = await http.post<unknown>(config.buildUrl(input), {
-        auth,
-        ...(config.extraHeaders ? { headers: config.extraHeaders } : {}),
-        body: config.buildBody(input),
-      });
-      const text = config.extractText(res.data);
-      const usage = config.extractUsage(res.data);
+      const url = config.buildUrl(input);
+      const post = async (body: TBody): Promise<unknown> => {
+        const res = await http.post<unknown>(url, {
+          auth,
+          ...(config.extraHeaders ? { headers: config.extraHeaders } : {}),
+          body,
+        });
+        return res.data;
+      };
+      const data = await send(post, config.buildBody(input));
+      const text = config.extractText(data);
+      const usage = config.extractUsage(data);
       return { text, model: input.model, ...(usage !== undefined ? { usage } : {}) };
     },
   });
@@ -132,6 +140,19 @@ export function throwNoText(label: string): never {
     message: `${label}: response did not contain generated text`,
     retryable: false,
   });
+}
+
+/** The generated text; none at a Max tokens stop means thinking spent the budget, and the failure says to raise it. */
+export function requireText(label: string, text: string | undefined, stoppedAtMaxTokens: boolean): string {
+  if (!text && stoppedAtMaxTokens) {
+    throw new ActionError({
+      code: 'provider_error',
+      message: `${label}: thinking used the whole Max tokens budget before any text was written; thinking counts toward Max tokens, so raise it`,
+      retryable: false,
+    });
+  }
+  if (text === undefined) throwNoText(label);
+  return text;
 }
 
 /** Read a top-level field off the (unknown) response. */
