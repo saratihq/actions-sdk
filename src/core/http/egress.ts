@@ -16,8 +16,9 @@ import {
 const PROXY_VARS = ['http_proxy', 'HTTP_PROXY', 'https_proxy', 'HTTPS_PROXY', 'no_proxy', 'NO_PROXY'];
 // A proxy that will not connect or answer a tunnel request within this gives up well inside a request's own budget.
 const PROXY_TIMEOUT_MS = 10_000;
-// Every request carries the HttpClient's own deadline; undici's 300 s defaults would cut a long model call short.
-const REQUEST_TIMERS = { headersTimeout: 0, bodyTimeout: 0 };
+// For a request that ends at its own deadline: undici's 300 s header and body timers would cut a long model call short.
+const UNTIMED: Dispatcher.DispatcherComposeInterceptor = (dispatch) => (opts, handler) =>
+  dispatch({ ...opts, headersTimeout: 0, bodyTimeout: 0 }, handler);
 
 interface Proxy {
   pool: Pool;
@@ -248,14 +249,13 @@ function proxiedConnector(
 
 function createEgress(key: string, proxied: boolean): Egress {
   if (!proxied) {
-    const dispatcher = new Agent({ ...REQUEST_TIMERS, connect: directConnector() });
+    const dispatcher = new Agent({ connect: directConnector() });
     return { key, dispatcher, close: () => dispatcher.close() };
   }
   const httpProxy = proxyFor('HTTP_PROXY', envValue('http_proxy', 'HTTP_PROXY'));
   const httpsProxy = proxyFor('HTTPS_PROXY', envValue('https_proxy', 'HTTPS_PROXY')) ?? httpProxy;
   const noProxy = parseNoProxy(process.env.no_proxy ?? process.env.NO_PROXY ?? '');
   const dispatcher = new Agent({
-    ...REQUEST_TIMERS,
     connect: proxiedConnector({ 'http:': httpProxy, 'https:': httpsProxy }, noProxy),
   });
   const pools = [...new Set([httpProxy, httpsProxy])].flatMap((proxy) => (proxy ? [proxy.pool] : []));
@@ -266,18 +266,18 @@ function createEgress(key: string, proxied: boolean): Egress {
   };
 }
 
-/** The dispatcher for the current allowlist and proxy env; a change gets a fresh one, since its sockets were vetted under the old settings. */
-export function egressDispatcher(): Dispatcher {
+/** The dispatcher for the current allowlist and proxy env, without undici's 300 s timers when `untimed`; a change gets a fresh one, since its sockets were vetted under the old settings. */
+export function egressDispatcher(untimed: boolean): Dispatcher {
   const proxied = envProxyEnabled();
   const key = [
     proxied,
     process.env[SSRF_ALLOWLIST_ENV] ?? '',
     ...PROXY_VARS.map((name) => process.env[name] ?? ''),
   ].join('\n');
-  if (egress?.key === key) return egress.dispatcher;
-  const next = createEgress(key, proxied);
-  const previous = egress;
-  egress = next;
-  void previous?.close().catch(() => undefined);
-  return next.dispatcher;
+  if (egress?.key !== key) {
+    const previous = egress;
+    egress = createEgress(key, proxied);
+    void previous?.close().catch(() => undefined);
+  }
+  return untimed ? egress.dispatcher.compose(UNTIMED) : egress.dispatcher;
 }

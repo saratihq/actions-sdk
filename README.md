@@ -106,6 +106,10 @@ connection then dials, with or without a proxy, and every redirect hop is judged
   `ORCHESTR_HTTP_ALLOWED_HOSTS`, which sends them to the proxy by name, unjudged, leaving the proxy
   as the only control for them. The same applies to a name this machine cannot resolve, which is
   otherwise refused.
+- **Timeouts:** a request sent through `HttpClient` waits for the server until its own timeout
+  (`timeoutMs`, else the client's `defaultTimeoutMs`, 30 s unless set), however long that is.
+  `guardedFetch` called on its own keeps undici's 300 s header and body timers, with or without a
+  `signal`.
 - **Ahead of time:** `guardUserUrl(url)` checks a URL without sending anything, for validating
   input on save.
 - **Tests:** passing `fetchImpl` to `createDirectAuth` replaces `guardedFetch` and so switches

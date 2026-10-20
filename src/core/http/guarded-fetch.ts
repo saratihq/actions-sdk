@@ -3,6 +3,7 @@ import { isNativeError } from 'node:util/types';
 import { fetch, type Response } from 'undici';
 
 import { ActionError, transportFailure } from '../errors';
+import { hasDeadline } from './deadline';
 import { egressDispatcher } from './egress';
 import { allowedHosts, preflightTarget, ssrfRefusal, targetHost, withoutUserinfo } from './ssrf';
 import type { FetchLike } from './types';
@@ -88,7 +89,7 @@ async function send(url: URL, init: FetchInit): Promise<Response> {
       body,
       signal,
       redirect: 'manual',
-      dispatcher: egressDispatcher(),
+      dispatcher: egressDispatcher(hasDeadline(signal)),
     });
   } catch (err) {
     if (err instanceof ActionError) throw err;
@@ -179,7 +180,7 @@ function namingRedirect(err: unknown, url: URL, from: string | undefined): unkno
     : err;
 }
 
-/** The SDK's network hop: fetch, except every dialled address must be public, every redirect hop is re-guarded, the credential never leaves its origin, Node's env proxy is honoured, and only `signal` ends a wait for the server. */
+/** The SDK's network hop: fetch, except every dialled address must be public, every redirect hop is re-guarded, the credential never leaves its origin, Node's env proxy is honoured, and undici's 300 s header and body timers apply unless the signal is an `HttpClient` request's own deadline. */
 export const guardedFetch: FetchLike = async (input, init = {}) => {
   let url = requestUrl(input);
   let request: FetchInit = { ...init, headers: { ...init.headers } };
