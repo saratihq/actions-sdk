@@ -1,5 +1,6 @@
 import type { AuthHandle } from '../../core/auth';
 import { createDirectAuth } from '../../core/auth-factories';
+import { ActionError } from '../../core/errors';
 import { HttpClient } from '../../core/http/client';
 import { liveDescribe } from '../../testing/live';
 import { claudeGenerateText } from './claude';
@@ -101,6 +102,40 @@ liveDescribe('ai — live generate_text via direct transport', () => {
       expect(words).toBeGreaterThan(150);
     },
     120_000,
+  );
+
+  (geminiKey ? it : it.skip)(
+    'gemini.generate_text fails naming Max tokens when thinking uses the whole budget',
+    async () => {
+      const auth: AuthHandle = createDirectAuth(geminiGenerateText.auth, {
+        type: 'apiKey',
+        value: geminiKey ?? '',
+      });
+      const outcome: unknown = await geminiGenerateText
+        .execute({
+          auth,
+          http,
+          props: {
+            prompt: 'In about 300 words, explain why the sky is blue and why sunsets are red.',
+            model: geminiGenerateText.props.model.defaultValue!,
+            maxTokens: 16,
+          },
+        })
+        .then(
+          (out) => out.text,
+          (err: unknown) => err,
+        );
+      console.log(
+        `live: gemini.generate_text, Max tokens 16 → ${outcome instanceof ActionError ? outcome.code : JSON.stringify(outcome)}`,
+      );
+      expect(outcome).toMatchObject({
+        code: 'provider_error',
+        retryable: false,
+        message:
+          'gemini: thinking used the whole Max tokens budget before any text was written; thinking counts toward Max tokens, so raise it',
+      });
+    },
+    60_000,
   );
 
   const mistralKey = process.env.MISTRAL_API_KEY;

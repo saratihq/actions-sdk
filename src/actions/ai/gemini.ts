@@ -33,17 +33,18 @@ function geminiBody(input: GenerateInput): JsonValue {
 
 /** Extract `candidates[0].content.parts[0].text`, or throw. */
 function extractGeminiText(data: unknown): string {
-  const candidate = asArray(asRecord(data)?.candidates)?.[0];
-  if (asRecord(candidate)?.finishReason === 'MAX_TOKENS') {
+  const candidate = asRecord(asArray(asRecord(data)?.candidates)?.[0]);
+  const firstPart = asArray(asRecord(candidate?.content)?.parts)?.[0];
+  const text = asRecord(firstPart)?.text;
+  const noText = typeof text !== 'string' || text === '';
+  if (noText && candidate?.finishReason === 'MAX_TOKENS') {
     throw new ActionError({
       code: 'provider_error',
       message:
-        'gemini: the response reached the Max tokens limit before it finished; thinking counts toward that limit, so raise Max tokens',
+        'gemini: thinking used the whole Max tokens budget before any text was written; thinking counts toward Max tokens, so raise it',
       retryable: false,
     });
   }
-  const firstPart = asArray(asRecord(asRecord(candidate)?.content)?.parts)?.[0];
-  const text = asRecord(firstPart)?.text;
   if (typeof text !== 'string') throwNoText('gemini');
   return text;
 }

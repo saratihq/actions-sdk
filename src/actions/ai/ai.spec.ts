@@ -253,30 +253,96 @@ describe('gemini.generate_text', () => {
     ).rejects.toMatchObject({ code: 'provider_error' });
   });
 
-  it.each([
-    ['cut-off text', { role: 'model', parts: [{ text: 'The article argues that the central' }] }],
-    ['no text at all', { role: 'model' }],
-  ])('names the Max tokens limit when the candidate stopped there with %s', async (_, content) => {
+  it('returns the text of a normal STOP unchanged', async () => {
     const { auth, http } = fake(
       constant({
-        candidates: [{ content, finishReason: 'MAX_TOKENS' }],
-        usageMetadata: { promptTokenCount: 2100, thoughtsTokenCount: 1000, totalTokenCount: 3124 },
+        candidates: [{ content: { role: 'model', parts: [{ text: 'done' }] }, finishReason: 'STOP' }],
+        usageMetadata: { totalTokenCount: 12 },
       }),
     );
-    await expect(
-      geminiGenerateText.execute({
-        auth,
-        http,
-        props: {
-          prompt: 'Summarize this article in about 300 words.',
-          model: 'gemini-3.6-flash',
-          maxTokens: 1024,
-        },
-      }),
-    ).rejects.toMatchObject({
-      code: 'provider_error',
-      retryable: false,
-      message: expect.stringContaining('reached the Max tokens limit before it finished'),
+    const out = await geminiGenerateText.execute({
+      auth,
+      http,
+      props: { prompt: 'x', model: 'gemini-3.6-flash' },
     });
+    expect(out).toEqual({ text: 'done', model: 'gemini-3.6-flash', usage: { totalTokenCount: 12 } });
+  });
+
+  it.each([
+    ['no parts', { role: 'model' }],
+    ['an empty signed text part', { role: 'model', parts: [{ text: '', thoughtSignature: 'c2ln' }] }],
+  ])(
+    'fails naming Max tokens and thinking when the candidate stopped at MAX_TOKENS with %s',
+    async (_, content) => {
+      const { auth, http } = fake(
+        constant({
+          candidates: [{ content, finishReason: 'MAX_TOKENS' }],
+          usageMetadata: { promptTokenCount: 2100, thoughtsTokenCount: 1024, totalTokenCount: 3124 },
+        }),
+      );
+      await expect(
+        geminiGenerateText.execute({
+          auth,
+          http,
+          props: {
+            prompt: 'Summarize this article in about 300 words.',
+            model: 'gemini-3.6-flash',
+            maxTokens: 1024,
+          },
+        }),
+      ).rejects.toMatchObject({
+        code: 'provider_error',
+        retryable: false,
+        message:
+          'gemini: thinking used the whole Max tokens budget before any text was written; thinking counts toward Max tokens, so raise it',
+      });
+    },
+  );
+
+  it.each(['STOP', 'SAFETY'])(
+    'still reports missing text when a candidate with no text stopped at %s',
+    async (finishReason) => {
+      const { auth, http } = fake(constant({ candidates: [{ content: { role: 'model' }, finishReason }] }));
+      await expect(
+        geminiGenerateText.execute({ auth, http, props: { prompt: 'x', model: 'gemini-3.6-flash' } }),
+      ).rejects.toMatchObject({
+        code: 'provider_error',
+        retryable: false,
+        message: 'gemini: response did not contain generated text',
+      });
+    },
+  );
+});
+
+describe('generate_text cut off at Max tokens', () => {
+  const cut = 'The article argues that the central';
+
+  it.each([
+    [
+      'gemini',
+      geminiGenerateText,
+      'gemini-3.6-flash',
+      { candidates: [{ content: { role: 'model', parts: [{ text: cut }] }, finishReason: 'MAX_TOKENS' }] },
+    ],
+    [
+      'claude',
+      claudeGenerateText,
+      'claude-opus-4-8',
+      { content: [{ type: 'text', text: cut }], stop_reason: 'max_tokens' },
+    ],
+    [
+      'openai',
+      openaiGenerateText,
+      'gpt-4o',
+      { choices: [{ message: { content: cut }, finish_reason: 'length' }] },
+    ],
+  ])('%s returns the text it got as a success', async (_, action, model, data) => {
+    const { auth, http } = fake(constant(data));
+    const out = await action.execute({
+      auth,
+      http,
+      props: { prompt: 'Summarize this article in about 300 words.', model, maxTokens: 16 },
+    });
+    expect(out).toEqual({ text: cut, model });
   });
 });
