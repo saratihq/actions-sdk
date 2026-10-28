@@ -8,6 +8,7 @@ export {
   type NormalizedFailure,
   normalizeError,
   redactSecrets,
+  transportFailure,
 } from './core/errors';
 
 // Auth — schemes, the opaque handle, and the handle factories.
