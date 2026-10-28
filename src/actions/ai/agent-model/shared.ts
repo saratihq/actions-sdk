@@ -1,6 +1,12 @@
 import { ActionError } from '../../../core/errors';
 import { asRecord } from '../generate-text';
-import type { AgentConversationMessage, AgentToolCall, AgentUsage } from './types';
+import type {
+  AgentConversationMessage,
+  AgentModelRequest,
+  AgentToolCall,
+  AgentToolChoice,
+  AgentUsage,
+} from './types';
 
 /** Cross-provider serialization helpers shared by the four adapters. */
 
@@ -11,6 +17,11 @@ export function throwNoTurn(label: string): never {
     message: `${label}: response did not contain a model turn`,
     retryable: false,
   });
+}
+
+/** The request's tool choice when it binds tools; with none bound there is nothing to choose. */
+export function boundToolChoice(req: AgentModelRequest): AgentToolChoice | undefined {
+  return req.tools.length > 0 ? req.toolChoice : undefined;
 }
 
 /** Per buffer message, the call a tool result answers and its index: the k-th result for an id answers the latest turn's k-th call holding it. */

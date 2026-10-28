@@ -7,6 +7,7 @@ import {
   scrubError,
   scrubText,
 } from '../errors';
+import { markDeadline } from './deadline';
 import { buildForm, type FormInput } from './form';
 import { buildMultipart, type MultipartInput } from './multipart';
 import { backoffDelay, DEFAULT_RETRY_POLICY, parseRetryAfter, type RetryPolicy, sleep } from './retry';
@@ -253,7 +254,7 @@ function withTimeout(
     if (timer) clearTimeout(timer);
     caller?.removeEventListener('abort', onCallerAbort);
   };
-  return { signal: controller.signal, expired, dispose };
+  return { signal: markDeadline(controller.signal), expired, dispose };
 }
 
 /** Build a NormalizedFailure from a non-2xx HTTP response, extracting a useful message. */

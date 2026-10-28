@@ -16,6 +16,9 @@ import {
 const PROXY_VARS = ['http_proxy', 'HTTP_PROXY', 'https_proxy', 'HTTPS_PROXY', 'no_proxy', 'NO_PROXY'];
 // A proxy that will not connect or answer a tunnel request within this gives up well inside a request's own budget.
 const PROXY_TIMEOUT_MS = 10_000;
+// For a request that ends at its own deadline: undici's 300 s header and body timers would cut a long model call short.
+const UNTIMED: Dispatcher.DispatcherComposeInterceptor = (dispatch) => (opts, handler) =>
+  dispatch({ ...opts, headersTimeout: 0, bodyTimeout: 0 }, handler);
 
 interface Proxy {
   pool: Pool;
@@ -263,18 +266,18 @@ function createEgress(key: string, proxied: boolean): Egress {
   };
 }
 
-/** The dispatcher for the current allowlist and proxy env; a change gets a fresh one, since its sockets were vetted under the old settings. */
-export function egressDispatcher(): Dispatcher {
+/** The dispatcher for the current allowlist and proxy env, without undici's 300 s timers when `untimed`; a change gets a fresh one, since its sockets were vetted under the old settings. */
+export function egressDispatcher(untimed: boolean): Dispatcher {
   const proxied = envProxyEnabled();
   const key = [
     proxied,
     process.env[SSRF_ALLOWLIST_ENV] ?? '',
     ...PROXY_VARS.map((name) => process.env[name] ?? ''),
   ].join('\n');
-  if (egress?.key === key) return egress.dispatcher;
-  const next = createEgress(key, proxied);
-  const previous = egress;
-  egress = next;
-  void previous?.close().catch(() => undefined);
-  return next.dispatcher;
+  if (egress?.key !== key) {
+    const previous = egress;
+    egress = createEgress(key, proxied);
+    void previous?.close().catch(() => undefined);
+  }
+  return untimed ? egress.dispatcher.compose(UNTIMED) : egress.dispatcher;
 }

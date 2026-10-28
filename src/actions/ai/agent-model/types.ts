@@ -1,3 +1,5 @@
+import type { JsonValue } from '../../../core/http/types';
+
 /** The tool-aware model-call contract: conversation buffer in, normalized turn + usage out. */
 
 /** The provider families the agent's model call supports. */
@@ -25,6 +27,17 @@ export interface AgentToolSchema {
   parameters: JsonSchema;
 }
 
+/** A provider's assistant turn exactly as it returned it, kept only to write that turn back on the wire. */
+export interface AgentTurnReplay {
+  /** The provider whose serializer writes `content` back; every other provider ignores it. */
+  provider: AgentProvider;
+  /** Gemini: the candidate's `parts`; Claude: the response's `content` blocks. */
+  content: JsonValue;
+}
+
+/** `auto` lets the model decide whether to call a tool; `none` forbids every call. */
+export type AgentToolChoice = 'auto' | 'none';
+
 /** One buffer message; `system` is not a buffer message — it rides the request's own `system` field. */
 export interface AgentConversationMessage {
   role: 'user' | 'assistant' | 'tool';
@@ -34,6 +47,8 @@ export interface AgentConversationMessage {
   toolCalls?: AgentToolCall[];
   /** Present on a `tool` turn — which {@link AgentToolCall.id} this result answers. */
   toolCallId?: string;
+  /** Set on an `assistant` turn that carried reasoning state; only its own provider writes it back, verbatim. */
+  replay?: AgentTurnReplay;
 }
 
 /** Aggregate token usage, normalized across providers' differing field names. */
@@ -48,6 +63,8 @@ export interface AgentModelResult {
   text?: string;
   toolCalls: AgentToolCall[];
   usage?: AgentUsage;
+  /** Present only when the raw turn carries reasoning state (thought signatures, thinking blocks). */
+  replay?: AgentTurnReplay;
 }
 
 /** What the loop hands the model call each round (system + running buffer + the bound tools' schemas). */
@@ -58,6 +75,8 @@ export interface AgentModelRequest {
   system: string;
   messages: AgentConversationMessage[];
   tools: AgentToolSchema[];
+  /** Whether the model may call `tools`; `none` keeps them in the request and forbids a call. Sent only when `tools` is non-empty. */
+  toolChoice?: AgentToolChoice;
   temperature?: number;
   /** Upper bound on generated tokens; Anthropic requires it and defaults to 4096. */
   maxTokens?: number;
@@ -68,6 +87,6 @@ export interface AgentModelAdapter {
   buildUrl(req: AgentModelRequest): string;
   /** Non-secret headers this provider requires (e.g. `anthropic-version`). */
   extraHeaders?: Record<string, string>;
-  buildBody(req: AgentModelRequest): import('../../../core/http/types').JsonValue;
+  buildBody(req: AgentModelRequest): JsonValue;
   parseResponse(data: unknown): AgentModelResult;
 }

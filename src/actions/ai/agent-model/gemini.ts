@@ -1,12 +1,20 @@
 import type { JsonValue } from '../../../core/http/types';
 import { asArray, asRecord } from '../generate-text';
-import { answeredCalls, normalizeUsage, throwNoTurn, type ToolCallDraft, uniqueToolCalls } from './shared';
+import {
+  answeredCalls,
+  boundToolChoice,
+  normalizeUsage,
+  throwNoTurn,
+  type ToolCallDraft,
+  uniqueToolCalls,
+} from './shared';
 import type {
   AgentConversationMessage,
   AgentModelAdapter,
   AgentModelRequest,
   AgentModelResult,
   AgentToolCall,
+  AgentToolChoice,
   AgentToolSchema,
 } from './types';
 
@@ -93,8 +101,9 @@ function geminiIssuedId(call: AgentToolCall, index: number): string | undefined 
   return call.id === synthesizeId(call.name, index) ? undefined : call.id;
 }
 
-/** An assistant turn → a `model` content with a text part (if any) + `functionCall` parts. */
+/** An assistant turn → its parts as returned when signed, else a text part (if any) + `functionCall` parts. */
 function modelContent(message: AgentConversationMessage): JsonValue {
+  if (message.replay?.provider === 'gemini') return { role: 'model', parts: message.replay.content };
   const parts: JsonValue[] = [];
   if (message.content) parts.push({ text: message.content });
   (message.toolCalls ?? []).forEach((call, index) => {
@@ -141,7 +150,10 @@ function geminiContents(messages: readonly AgentConversationMessage[]): JsonValu
   return out;
 }
 
+const FUNCTION_CALLING_MODE: Record<AgentToolChoice, string> = { auto: 'AUTO', none: 'NONE' };
+
 function buildBody(req: AgentModelRequest): JsonValue {
+  const toolChoice = boundToolChoice(req);
   const generationConfig: Record<string, JsonValue> = {};
   if (req.temperature !== undefined) generationConfig.temperature = req.temperature;
   if (req.maxTokens !== undefined) generationConfig.maxOutputTokens = req.maxTokens;
@@ -151,9 +163,18 @@ function buildBody(req: AgentModelRequest): JsonValue {
     ...(req.tools.length > 0
       ? { tools: [{ functionDeclarations: req.tools.map(functionDeclaration) }] }
       : {}),
+    ...(toolChoice
+      ? { toolConfig: { functionCallingConfig: { mode: FUNCTION_CALLING_MODE[toolChoice] } } }
+      : {}),
     ...(req.system ? { systemInstruction: { parts: [{ text: req.system }] } } : {}),
     ...(Object.keys(generationConfig).length > 0 ? { generationConfig } : {}),
   };
+}
+
+// Gemini 3+ rejects a step whose first functionCall part comes back without its signature, in that exact part.
+function carriesSignature(part: unknown): boolean {
+  const signature = asRecord(part)?.thoughtSignature;
+  return typeof signature === 'string' && signature.length > 0;
 }
 
 function parseResponse(data: unknown): AgentModelResult {
@@ -189,7 +210,10 @@ function parseResponse(data: unknown): AgentModelResult {
     'candidatesTokenCount',
     'totalTokenCount',
   );
-  return { ...(text ? { text } : {}), toolCalls, ...(usage ? { usage } : {}) };
+  const replay = parts.some(carriesSignature)
+    ? { provider: 'gemini' as const, content: parts as JsonValue }
+    : undefined;
+  return { ...(text ? { text } : {}), toolCalls, ...(usage ? { usage } : {}), ...(replay ? { replay } : {}) };
 }
 
 /** Gemini generateContent tool-aware adapter. */
